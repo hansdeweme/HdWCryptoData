@@ -1,0 +1,8 @@
+certifi==2026.7.22
+mpire==2.10.2
+numpy==2.5.2
+pandas==3.0.5
+python_dateutil==2.9.0.post0
+Requests==2.34.2
+tqdm==4.67.3
+urllib3==2.7.0
