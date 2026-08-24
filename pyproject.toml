@@ -1,0 +1,77 @@
+[build-system]
+requires = ["setuptools>=77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hdw-crypto-data"
+dynamic = ["version"]
+description = "Download, verify, merge and normalize cryptocurrency data from Binance Vision and the Binance REST API."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+
+authors = [
+    { name = "Hans De Weme", email = "hdweme@gmail.com" }
+]
+
+dependencies = [
+    "certifi",
+    "numpy",
+    "pandas",
+    "python-dateutil",
+    "requests",
+    "tqdm",
+    "urllib3",
+]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",    
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+keywords = [
+    "binance",
+    "binance-vision",
+    "cryptocurrency",
+    "market-data",
+    "time-series",
+    "klines",
+]
+
+[project.optional-dependencies]
+parallel = [
+    "mpire",
+]
+
+analysis = [
+    "openpyxl",
+    "pandas-ta",
+    "plotly",
+    "progressbar2",
+    "scipy",
+    "ta",
+]
+
+gui = [
+    "hdw-crypto-data[analysis]",
+    "PyQt6",
+]
+
+[project.urls]
+Homepage = "https://code2trade.dev"
+Repository = "https://github.com/hansdeweme/HdWCryptoData"
+Issues = "https://github.com/hansdeweme/HdWCryptoData/issues"
+
+[tool.setuptools.dynamic]
+version = { attr = "hdw_crypto_data.version.VERSION" }
+
+[tool.setuptools.packages.find]
+include = ["hdw_crypto_data*"]

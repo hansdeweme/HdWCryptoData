@@ -1,0 +1,6 @@
+{
+    "spot": "./data",
+    "full_spot": "./data/spot",
+    "preferred_time_zone": "Europe/Amsterdam",
+    "quote_currency": "USDT"
+}
