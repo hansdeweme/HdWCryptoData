@@ -6,6 +6,8 @@ The core package is intentionally kept lightweight. GUI tools and technical-anal
 
 Repository: <https://github.com/hansdeweme/HdWCryptoData>
 
+Extended Documentation: <https://code2trade.dev/from-binance-scripts-to-a-reusable-python-data-package/>
+
 ## What It Does
 
 - downloads historical Binance Vision kline CSV files

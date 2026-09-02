@@ -446,3 +446,4 @@ class BinanceVisionDumper:
             else:
                 date_to_use = date_to_use + relativedelta(days=1)
         return list_dates
+

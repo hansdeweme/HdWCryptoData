@@ -1,13 +1,14 @@
 __pycache__/
 *.pyc
 *.zip
+*.png
 *.py[cod]
 *.egg-info/
 build/
 dist/
 .venv/
 .pytest_cache/
-.examples/crypto_icons/
+/examples/crypto_icons/
 .coverage
 htmlcov/
 venv/
