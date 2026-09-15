@@ -20,6 +20,8 @@ DEFAULT_COLUMNS = [
     'close_time', 'quote_asset_volume', 'number_of_trades',
     'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
 ]
+TOTAL_DATASET_GLOB = "{market}-spot-{frequency}-total-*--*.csv"
+
 
 def load_settings(settings) -> dict:
     if isinstance(settings, dict):
@@ -28,6 +30,25 @@ def load_settings(settings) -> dict:
         with open(settings, 'r') as f:
             return json.load(f)
     return {}
+
+def format_total_dataset_datetime(value) -> str:
+    """Format epoch-like candle timestamps as a filesystem-safe UTC datetime."""
+    numeric_value = pd.to_numeric(value, errors='coerce')
+    if pd.isna(numeric_value):
+        raise ValueError(f"Invalid candle timestamp: {value}")
+    if numeric_value > 1e14:
+        seconds = numeric_value / 1e6
+    elif numeric_value > 1e11:
+        seconds = numeric_value / 1e3
+    else:
+        seconds = numeric_value
+    timestamp = pd.to_datetime(seconds, unit='s', utc=True)
+    return timestamp.strftime("%Y-%m-%dT%H-%M-%SZ")
+
+def total_dataset_filename(market: str, frequency: str, start_time, end_time) -> str:
+    start_text = format_total_dataset_datetime(start_time)
+    end_text = format_total_dataset_datetime(end_time)
+    return f"{market}-spot-{frequency}-total-{start_text}--{end_text}.csv"
 
 class TotalDatasetLoader:
     """Load and clean previously generated total dataset CSV files."""
@@ -40,6 +61,18 @@ class TotalDatasetLoader:
         )
         self.current_dir = current_dir or os.getcwd()
         self.COLUMNS = list(DEFAULT_COLUMNS)
+        self.data_frequency = self.settings.get("data_frequency", "1h")
+
+    def find_total_dataset_file(self) -> str:
+        """Find the newest total CSV for this market and configured frequency."""
+        current_path = Path(self.current_dir)
+        pattern = TOTAL_DATASET_GLOB.format(market=self.MARKET, frequency=self.data_frequency)
+        candidates = [path for path in current_path.glob(pattern) if path.is_file()]
+        if candidates:
+            return str(max(candidates, key=lambda path: path.stat().st_mtime))
+
+        legacy_path = current_path / f"{self.MARKET}-total.csv"
+        return str(legacy_path)
 
     def convert_dataframe_timezone(self, df: pd.DataFrame, preferred_tz: str = None) -> pd.DataFrame:
         if preferred_tz is None:
@@ -74,7 +107,7 @@ class TotalDatasetLoader:
             fill_gaps = clean_and_fill
 
         if file_path is None:
-            file_path = os.path.join(self.current_dir, f"{self.MARKET}-total.csv")
+            file_path = self.find_total_dataset_file()
         if not os.path.isfile(file_path):
             raise FileNotFoundError(f"Total dataset file not found: {file_path}")
         if preferred_tz is None:
@@ -208,7 +241,7 @@ class TotalDatasetLoader:
 
     def is_file_recent(self, file_path: str = None, max_age_hours: float = 2.0) -> bool:
         if file_path is None:
-            file_path = os.path.join(self.current_dir, f"{self.MARKET}-total.csv")
+            file_path = self.find_total_dataset_file()
         if not os.path.isfile(file_path):
             return False
         try:

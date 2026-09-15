@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "hdw-crypto-data"
 dynamic = ["version"]
 description = "Download, verify, merge and normalize cryptocurrency data from Binance Vision and the Binance REST API."
-readme = "README.md"
+readme = "readme.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]

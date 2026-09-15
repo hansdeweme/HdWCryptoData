@@ -1,4 +1,4 @@
-# binacedump.py
+# binance_dump.py
 # Copyright (c) 2025, 2026 Hans De Weme
 # Licensed under the MIT License (https://opensource.org/licenses/MIT).
 # part of the HdW_crypto_data Project
@@ -32,7 +32,8 @@ def _load_settings(path: Path) -> dict[str, str]:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Download Binance Vision kline CSV files.")
     parser.add_argument("asset", nargs="?", default=DEFAULT_ASSET, help="Asset symbol, e.g. BONK or BONKUSDT.")
-    parser.add_argument("--settings", default="settings.json", help="Path to settings.json.")
+    parser.add_argument("--settings", default=str(Path(__file__).resolve().with_name("settings.json")),
+                        help="Settings file (default: settings.json beside this script).")
     parser.add_argument("--dump-dir", default=None, help="Directory where the Binance data tree is stored.")
     parser.add_argument("--quote", default=None, help="Quote currency to append when asset has no quote suffix.")
     parser.add_argument("--frequency", default=DEFAULT_FREQUENCY, help="Kline frequency, e.g. 1m, 5m, 1h, 1d.")

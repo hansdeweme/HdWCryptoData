@@ -11,13 +11,13 @@ import re
 import shutil
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import pandas as pd
 # local imports
 from dateutil.relativedelta import relativedelta
 from .binance_rest_client import BinanceRestClient
-from .total_dataset_loader import TotalDatasetLoader
+from .total_dataset_loader import TotalDatasetLoader, total_dataset_filename
 
 
 @dataclass(frozen=True)
@@ -53,7 +53,7 @@ class TotalDatasetBuilder(TotalDatasetLoader):
         spot_path = Path(self.settings.get("full_spot", "..\\spot"))
         dir_path = str(spot_path.resolve())
 
-        print("[Info] Start with market-chosen: " + self.MARKET)
+        print("[Info] ----> Start with market-chosen: " + self.MARKET)
         self.WORK = dir_path
         self.MONTHS = self._resolve_kline_dir(dir_path, "monthly")
         self.DAYS = self._resolve_kline_dir(dir_path, "daily")
@@ -62,7 +62,7 @@ class TotalDatasetBuilder(TotalDatasetLoader):
         print(f"[Info] ---> Months Directory: {self.MONTHS}")
         print(f"[Info] ---> Days Directory: {self.DAYS}")
 
-    def build(self) -> MakeTotalResult:
+    def build(self, open_candle: str | None = None) -> MakeTotalResult:
         """Build and return an explicit result for the newly generated total dataset."""
         is_recent, most_recent_date = self.check_recent_spotmarket_files(self.MONTHS, self.DAYS, self.MARKET)
 
@@ -71,7 +71,7 @@ class TotalDatasetBuilder(TotalDatasetLoader):
             print(f"[Warning] {msg}")
             raise MakeTotalError(self.MARKET, msg)
 
-        if not self.collect_data():
+        if not self.collect_data(open_candle=open_candle):
             msg = f"Failed to collect live Binance data for {self.MARKET}."
             raise MakeTotalError(self.MARKET, msg)
 
@@ -85,10 +85,10 @@ class TotalDatasetBuilder(TotalDatasetLoader):
 
     def _resolve_kline_dir(self, base_dir: str, timeperiod: str) -> str:
         """Find the correct kline directory whether stored in base/ or base/spot/."""
-        path1 = os.path.join(base_dir, timeperiod, "klines", self.MARKET, "1h")
+        path1 = os.path.join(base_dir, timeperiod, "klines", self.MARKET, self.data_frequency)
         if os.path.exists(path1):
             return path1
-        path2 = os.path.join(base_dir, "spot", timeperiod, "klines", self.MARKET, "1h")
+        path2 = os.path.join(base_dir, "spot", timeperiod, "klines", self.MARKET, self.data_frequency)
         if os.path.exists(path2):
             return path2
         return path1
@@ -136,13 +136,37 @@ class TotalDatasetBuilder(TotalDatasetLoader):
         print(f"[Info] Historical data is {diff_days} days old (> 20 days).")
         return False, most_recent_date.date()
 
-    def collect_data(self) -> bool:
+    def resolve_open_candle_policy(self, open_candle: str | None = None) -> str:
+        policy = open_candle if open_candle is not None else self.settings.get("open_candle", "exclude")
+        policy = str(policy).strip().lower()
+        if policy not in ("exclude", "include"):
+            raise MakeTotalError(
+                self.MARKET,
+                f"Invalid open_candle policy '{policy}'. Use 'exclude' or 'include'.",
+            )
+        return policy
+
+    def apply_open_candle_policy(self, df: pd.DataFrame, open_candle: str) -> pd.DataFrame:
+        if open_candle == "include" or df.empty or "close_time" not in df.columns:
+            return df
+
+        close_time = pd.to_numeric(df["close_time"], errors="coerce")
+        close_time_ms = close_time.where(close_time <= 1e14, close_time / 1e3)
+        now_ms = datetime.now(timezone.utc).timestamp() * 1000
+        closed_df = df[close_time_ms < now_ms].copy()
+        removed_count = len(df) - len(closed_df)
+        if removed_count:
+            print(f"[Info] Excluded {removed_count} unfinished live candle(s)")
+        return closed_df
+
+    def collect_data(self, open_candle: str | None = None) -> bool:
         """Fetch the latest 500 hourly candles from Binance REST API."""
+        policy = self.resolve_open_candle_policy(open_candle)
         try:
             df = self.recent_source.fetch_recent_klines(
                 self.MARKET,
                 columns=self.COLUMNS,
-                interval="1h",
+                interval=self.data_frequency,
                 limit=500,
             )
         except ConnectionError as ex:
@@ -151,14 +175,18 @@ class TotalDatasetBuilder(TotalDatasetLoader):
         except ValueError as ex:
             raise MakeTotalError(self.MARKET, str(ex)) from ex
 
+        df = self.apply_open_candle_policy(df, policy)
+        if df.empty:
+            raise MakeTotalError(self.MARKET, "No closed live candles returned by Binance")
+
         now_str = datetime.now().strftime("%Y-%m-%d")
         self.current_data = os.path.join(self.current_dir, f"{self.MARKET}-{now_str}.csv")
         df.to_csv(self.current_data, index=False)
-        print(f"[Info] Latest {len(df)} live hourly datapoints collected from Binance")
+        print(f"[Info] Latest {len(df)} live {self.data_frequency} datapoints collected from Binance")
         return True
 
     def merge_data(self) -> tuple[str, int]:
-        """Merge historical monthly, daily, and live hourly candles into {MARKET}-total.csv."""
+        """Merge historical monthly, daily, and live hourly candles into a total CSV."""
         os.makedirs(self.WORK, exist_ok=True)
         work_dir = os.path.join(self.WORK, f"hdw-{self.MARKET}-{uuid.uuid4().hex[:8]}")
         os.makedirs(work_dir, exist_ok=False)
@@ -218,8 +246,18 @@ class TotalDatasetBuilder(TotalDatasetLoader):
             df_total = df_total.drop_duplicates(subset=['open_time'])
             df_total['open_time'] = pd.to_numeric(df_total['open_time'], errors='coerce')
             df_total = df_total.dropna(subset=['open_time']).sort_values('open_time').reset_index(drop=True)
+            if df_total.empty:
+                msg = "No rows with valid candle timestamps available to merge"
+                print(f"[Warning] {msg}")
+                raise MakeTotalError(self.MARKET, msg)
 
-            out_file = os.path.join(self.current_dir, f"{self.MARKET}-total.csv")
+            filename = total_dataset_filename(
+                self.MARKET,
+                self.data_frequency,
+                df_total['open_time'].iloc[0],
+                df_total['open_time'].iloc[-1],
+            )
+            out_file = os.path.join(self.current_dir, filename)
             temporary = out_file + ".tmp"
             df_total.to_csv(temporary, index=False)
             os.replace(temporary, out_file)

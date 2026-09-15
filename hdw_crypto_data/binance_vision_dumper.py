@@ -403,7 +403,7 @@ class BinanceVisionDumper:
 
     def delete_outdated_daily_results(self) -> None:
         """Delete daily CSV files for which full month monthly data is already present."""
-        print(f"[Info] Delete old daily data for which there is monthly data")
+        print(f"[Info] ----> Delete old daily data for which there is monthly data")
         deleted_count = 0
         tickers = self.get_all_tickers_with_data(timeperiod_per_file="daily")
         for ticker in tickers:
@@ -446,4 +446,3 @@ class BinanceVisionDumper:
             else:
                 date_to_use = date_to_use + relativedelta(days=1)
         return list_dates
-

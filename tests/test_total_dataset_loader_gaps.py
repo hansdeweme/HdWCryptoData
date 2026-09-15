@@ -3,6 +3,7 @@
 # Licensed under the MIT License (https://opensource.org/licenses/MIT).
 # part of the HdW_crypto_data Project
 #
+import os
 import shutil
 import unittest
 from pathlib import Path
@@ -66,6 +67,35 @@ class TotalDatasetLoaderGapTests(unittest.TestCase):
 
         self.assertEqual(len(df), 2)
         self.assertNotIn("is_imputed", df.columns)
+
+    def test_default_loader_finds_self_documenting_total_csv(self):
+        new_csv_path = self.temp_dir / (
+            "BONKUSDT-spot-1h-total-2026-12-22T00-00-00Z--2026-12-22T02-00-00Z.csv"
+        )
+        self.csv_path.replace(new_csv_path)
+
+        df = self.loader.load_total_dataframe(mode="ta")
+
+        self.assertEqual(len(df), 2)
+
+    def test_discovery_selects_newest_file_only_within_configured_frequency(self):
+        paths = {}
+        for frequency, day, modified in (("1h", "21", 100), ("1h", "22", 200), ("1d", "23", 300)):
+            path = self.temp_dir / (
+                f"BONKUSDT-spot-{frequency}-total-2026-12-{day}T00-00-00Z--2026-12-{day}T02-00-00Z.csv"
+            )
+            path.write_bytes(self.csv_path.read_bytes())
+            os.utime(path, (modified, modified))
+            paths[frequency] = path
+
+        self.assertEqual(self.loader.find_total_dataset_file(), str(paths["1h"]))
+        daily_loader = TotalDatasetLoader("BONK", {"data_frequency": "1d"}, current_dir=str(self.temp_dir))
+        self.assertEqual(daily_loader.find_total_dataset_file(), str(paths["1d"]))
+
+    def test_discovery_falls_back_to_legacy_when_only_other_frequency_exists(self):
+        daily = self.temp_dir / "BONKUSDT-spot-1d-total-2026-12-22T00-00-00Z--2026-12-23T00-00-00Z.csv"
+        daily.write_bytes(self.csv_path.read_bytes())
+        self.assertEqual(self.loader.find_total_dataset_file(), str(self.csv_path))
 
     def test_fill_gaps_marks_imputed_rows_and_keeps_trade_counts_integral(self):
         df = self.loader.load_total_dataframe(

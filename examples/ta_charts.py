@@ -72,7 +72,7 @@ class TACharts:
         fig.update_layout(xaxis_rangeslider_visible=True)
         pio.show(fig)
 
-    def plot_prijsvol(self, hrs):
+    def plot_pricevol(self, hrs):
         H = str(hrs)+'H' 
         D = self._last_period(H) 
         fig = make_subplots(specs=[[{"secondary_y": True}]])
@@ -87,37 +87,63 @@ class TACharts:
 
     # KELTNER CHANNEL CALCULATION
     def get_kc(self, high, low, close, kc_lookback, multiplier, atr_lookback):
-        tr1 = pd.DataFrame(high - low)
-        tr2 = pd.DataFrame(abs(high - close.shift()))
-        tr3 = pd.DataFrame(abs(low - close.shift()))
-        frames = [tr1, tr2, tr3]
-        tr = pd.concat(frames, axis = 1, join = 'inner').max(axis = 1)
-        atr = tr.ewm(alpha = 1/atr_lookback).mean()
-        kc_middle = close.ewm(kc_lookback).mean()
-        kc_upper = close.ewm(kc_lookback).mean() + multiplier * atr
-        kc_lower = close.ewm(kc_lookback).mean() - multiplier * atr
-        return kc_middle, kc_upper, kc_lower
+        previous_close = close.shift(1)
+        true_range = pd.concat([high - low, (high - previous_close).abs(), (low - previous_close).abs(),], axis=1,).max(axis=1)
+        atr = true_range.ewm(alpha=1 / atr_lookback, adjust=False, min_periods=atr_lookback,).mean()
+        middle = close.ewm(span=kc_lookback, adjust=False, min_periods=kc_lookback,).mean()
+        upper = middle + multiplier * atr
+        lower = middle - multiplier * atr
+        return middle, upper, lower
 
     def implement_kc_strategy(self, prices, kc_upper, kc_lower):
-        prices = pd.Series(prices)
-        kc_upper = pd.Series(kc_upper, index=prices.index)
-        kc_lower = pd.Series(kc_lower, index=prices.index)
-        buy_price = pd.Series(np.nan, index=prices.index, dtype="float64")
-        sell_price = pd.Series(np.nan, index=prices.index, dtype="float64")
-        kc_signal = pd.Series(0, index=prices.index, dtype="int64")
-        signal = 0    
-        for i in range(len(prices)-1):
-            signal_index = prices.index[i + 1]
-            if prices.iloc[i] < kc_lower.iloc[i] and prices.iloc[i + 1] > prices.iloc[i]:
-                if signal != 1:
-                    buy_price.loc[signal_index] = prices.iloc[i + 1]
-                    signal = 1
-                    kc_signal.loc[signal_index] = signal
-            elif prices.iloc[i] > kc_upper.iloc[i] and prices.iloc[i + 1] < prices.iloc[i]:
-                if signal != -1:
-                    sell_price.loc[signal_index] = prices.iloc[i + 1]
-                    signal = -1
-                    kc_signal.loc[signal_index] = signal
+        """Generate causal Keltner mean-reversion entry and exit signals.
+        Entry:
+            Previous close was below the previous lower channel and the current
+            close has returned to or above the current lower channel.
+        Exit:
+            Previous close was above the previous upper channel and the current
+            close has returned to or below the current upper channel.
+        Signals are known only after the current candle closes. Marker prices are
+        confirmation prices, not guaranteed executable trade prices.
+        """
+        prices = pd.Series(prices, copy=False).astype("float64")
+        kc_upper = pd.Series(kc_upper, copy=False).reindex(prices.index)
+        kc_lower = pd.Series(kc_lower, copy=False).reindex(prices.index)
+        if not prices.index.is_unique:
+            raise ValueError("prices index must be unique")
+        if not prices.index.is_monotonic_increasing:
+            raise ValueError("prices index must be chronologically sorted")
+
+        buy_price = pd.Series(np.nan, index=prices.index, dtype="float64", name="kc_buy_price", )
+        sell_price = pd.Series(np.nan, index=prices.index, dtype="float64", name="kc_sell_price",)
+        kc_signal = pd.Series(0, index=prices.index, dtype="int8", name="kc_signal",)
+        previous_price = prices.shift(1)
+        previous_upper = kc_upper.shift(1)
+        previous_lower = kc_lower.shift(1)
+        # Price was outside the channel and has now returned inside it.
+        buy_condition = ((previous_price < previous_lower) & (prices >= kc_lower))
+        sell_condition = ((previous_price > previous_upper) & (prices <= kc_upper))
+        # Long-only position state:
+        # 0 = no position
+        # 1 = long position
+        position = 0
+        for timestamp in prices.index:
+            price = prices.loc[timestamp]
+            # Warm-up observations and incomplete data cannot produce signals.
+            if (
+                pd.isna(price)
+                or pd.isna(kc_upper.loc[timestamp])
+                or pd.isna(kc_lower.loc[timestamp])
+            ):
+                continue
+            if position == 0 and bool(buy_condition.loc[timestamp]):
+                buy_price.loc[timestamp] = price
+                kc_signal.loc[timestamp] = 1
+                position = 1
+            elif position == 1 and bool(sell_condition.loc[timestamp]):
+                sell_price.loc[timestamp] = price
+                kc_signal.loc[timestamp] = -1
+                position = 0
         return buy_price, sell_price, kc_signal
 
     def do_keltner(self):
@@ -132,14 +158,14 @@ class TACharts:
         buy_price, sell_price, kc_signal = self.implement_kc_strategy(D['close'], D['kc_upper'], D['kc_lower'])
         
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=D.index, y=D['close'], mode='lines', name='prijs', line=dict(width=2, color = 'blue')))
+        fig.add_trace(go.Scatter(x=D.index, y=D['close'], mode='lines', name='price', line=dict(width=2, color = 'blue')))
         # Adding the Keltner Channel lines
         fig.add_trace(go.Scatter(x=D.index, y=D['kc_upper'],  mode='lines',  name='KC Upper 20',  line=dict(width=2, color='orange', dash='dash')))
         fig.add_trace(go.Scatter(x=D.index, y=D['kc_middle'], mode='lines',  name='KC Middle 20', line=dict(width=1.5, color='grey')))
         fig.add_trace(go.Scatter(x=D.index, y=D['kc_lower'],  mode='lines',  name='KC Lower 20',  line=dict(width=2, color='orange', dash='dash')))
         # Adding buy and sell signals
-        fig.add_trace(go.Scatter(x=D.index, y=buy_price,  mode='markers', name='Buy Signaal',  marker=dict(symbol='triangle-up', size=15, color='green')))
-        fig.add_trace(go.Scatter(x=D.index, y=sell_price, mode='markers', name='Sell Signaal', marker=dict(symbol='triangle-down', size=15, color='red')))
+        fig.add_trace(go.Scatter(x=D.index, y=buy_price,  mode='markers', name='Buy Signal',  marker=dict(symbol='triangle-up', size=15, color='green')))
+        fig.add_trace(go.Scatter(x=D.index, y=sell_price, mode='markers', name='Sell Signal', marker=dict(symbol='triangle-down', size=15, color='red')))
         # Updating the layout
         fig.update_layout(title='Keltner Channel 20 Trading Signals', legend=dict(x=1.02, y=0.8))
         fig.update_layout(xaxis_rangeslider_visible=True)
@@ -189,12 +215,12 @@ class TACharts:
         tekst2 = 'Note: Strong buy signal when SMA20 brakkes out above SMA50 - sell signal when SMA20 dives underneath SMA50!'
         fig = go.Figure()
         # raw data timeseries
-        fig.add_trace(go.Scatter(x=D.index, y=D['close'], mode='lines', name='prijs', line=dict(color='blue', width = 2)))
+        fig.add_trace(go.Scatter(x=D.index, y=D['close'], mode='lines', name='price', line=dict(color='blue', width = 2)))
         # Add moving average plot
         fig.add_trace(go.Scatter(x=D.index, y=D['7_hrs_MA'],   mode='lines', name='7-hrs Moving Average',  line=dict(color='yellow', width = 1)))  
         fig.add_trace(go.Scatter(x=D.index, y=D['20_hrs_MA'],  mode='lines', name='20-hrs Moving Average', line=dict(color='red', width = 1)))
         fig.add_trace(go.Scatter(x=D.index, y=D['50_hrs_MA'],  mode='lines', name='50-hrs Moving Average', line=dict(color='grey', width = 1)))
-        fig.update_layout(title=tekst1, xaxis_title=tekst2, yaxis_title='Prijs', legend_title='Legenda')
+        fig.update_layout(title=tekst1, xaxis_title=tekst2, yaxis_title='Price', legend_title='Legenda')
         fig.update_layout(xaxis_rangeslider_visible=True)
         fig.update_xaxes(title_font_color='blue')
         fig.update_xaxes(title_font_size=15)
@@ -299,9 +325,9 @@ class TACharts:
 
     # plot
     def plot_graph(self, symbol, data, entry_prices, exit_prices):
-        #  Plot close prijs and bollinger bands
+        #  Plot close price and bollinger bands
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x = data.index, y = data['close'],   line=dict(color="blue", width=1.5), name="Prijs"))  
+        fig.add_trace(go.Scatter(x = data.index, y = data['close'],   line=dict(color="blue", width=1.5), name="Price"))  
         fig.add_trace(go.Scatter(x = data.index, y = data['BB_high'], line=dict(color="orange", width=1), name="BB High"))
         fig.add_trace(go.Scatter(x = data.index, y = data['BB_mid'],  line=dict(color="#ffd866", width=1), name="BB Mid"))
         fig.add_trace(go.Scatter(x = data.index, y = data['BB_low'],  line=dict(color="orange", width=1), name="BB Low"))
@@ -309,8 +335,8 @@ class TACharts:
         #  fig.add_trace(go.Scatter(x = data.index, y = data['RSI'], line=dict(color="blue", width=1), name="RSI"), row = 2, col = 1)
         #  fig.add_trace(go.Scatter(x = data.index, y = data['STC'], line=dict(color="gray", width=1), name="STC"), row = 2, col = 1)
         #  Add buy and sell indicators
-        fig.add_trace(go.Scatter(x=data.index, y=entry_prices, marker_symbol="star-triangle-up",  marker=dict(size=10, color='#90EE90'), line=dict(color='black', width=1), mode='markers',name='Koop'))
-        fig.add_trace(go.Scatter(x=data.index, y=exit_prices, marker_symbol="star-triangle-down", marker=dict(size=10, color='red'), line=dict(color='black', width=1), mode='markers',name='Verkoop'))   
+        fig.add_trace(go.Scatter(x=data.index, y=entry_prices, marker_symbol="star-triangle-up",  marker=dict(size=10, color='#90EE90'), line=dict(color='black', width=1), mode='markers',name='Buy'))
+        fig.add_trace(go.Scatter(x=data.index, y=exit_prices, marker_symbol="star-triangle-down", marker=dict(size=10, color='red'), line=dict(color='black', width=1), mode='markers',name='Sell'))   
         fig.update_layout(title={'text':f"{symbol} with Bollinger Bands", 'x':0.5})
         fig.update_layout(xaxis_rangeslider_visible=True)
         pio.show(fig) 
@@ -341,7 +367,7 @@ class TACharts:
         exit_prices  = exit_prices[::-1]
         for i in range(len(entry_prices)):
             if np.isnan(entry_prices[i]) == False:  # most recent entry/buy price found! 
-                pprijs = f"{ entry_prices[i]:.4f}"
+                pprice = f"{ entry_prices[i]:.4f}"
                 prsi   = f"{rsi[i]:.0f}"
                 pdk    = pd.Timestamp(dtm[i]).strftime('%Y-%m-%d %H:%M')
                 ps7    = f"{sma7[i]:.4f}" 
@@ -350,11 +376,11 @@ class TACharts:
                 em7    = f"{ema7[i]:.4f}" 
                 em20   = f"{ema20[i]:.4f}" 
                 em50   = f"{ema50[i]:.4f}"           
-                print('Most recent Buy signal on: ' + pdk + " prijs: " +pprijs+ " RSI = "+prsi+ " SMA7 = "+ps7+ " SMA20 = "+ps20+ " SMA50 = "+ps50+ " EMA7 = "+em7+ " EMA20 = "+em20+ " EMA50 = "+em50)
+                print('Most recent Buy signal on: ' + pdk + " price: " +pprice+ " RSI = "+prsi+ " SMA7 = "+ps7+ " SMA20 = "+ps20+ " SMA50 = "+ps50+ " EMA7 = "+em7+ " EMA20 = "+em20+ " EMA50 = "+em50)
                 break # stop zoeken na 1e hit
         for i in range(len(exit_prices)):
             if np.isnan(exit_prices[i]) == False:  # most recent entry/buy price found!
-                pprijs = f"{exit_prices[i]:.4f}"
+                pprice = f"{exit_prices[i]:.4f}"
                 prsi   = f"{rsi[i]:.0f}"
                 pdk    = pd.Timestamp(dtm[i]).strftime('%Y-%m-%d %H:%M')
                 ps7    = f"{sma7[i]:.4f}" 
@@ -363,7 +389,7 @@ class TACharts:
                 em7    = f"{ema7[i]:.4f}" 
                 em20   = f"{ema20[i]:.4f}" 
                 em50   = f"{ema50[i]:.4f}"  
-                print('Most recent Sell signal on: ' + pdk + " prijs: " +pprijs+ " RSI = "+prsi+ " SMA7 = "+ps7+ " SMA20 = "+ps20+ " SMA50 = "+ps50+ " EMA7 = "+em7+ " EMA20 = "+em20+ " EMA50 = "+em50)
+                print('Most recent Sell signal on: ' + pdk + " price: " +pprice+ " RSI = "+prsi+ " SMA7 = "+ps7+ " SMA20 = "+ps20+ " SMA50 = "+ps50+ " EMA7 = "+em7+ " EMA20 = "+em20+ " EMA50 = "+em50)
                 break # stop searching after first hit
 
     def do_sim(self, i):
@@ -386,8 +412,8 @@ class TACharts:
         filtered_close_series = self.std_filtered_gaussian(data['close'], sigma=1, n_poles=1)
         ema1_series = data['close'].rolling(window=3).mean()
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=data.index, y=data['close'], mode='lines', name='Prijs', line=dict(color='blue', width=0.5)))
-        fig.add_trace(go.Scatter(x=data.index, y=filtered_close_series, mode='lines', name='Gefilterde Prijs (Std: 1, Poles: 1)', line=dict(color='green', width=0.5)))
+        fig.add_trace(go.Scatter(x=data.index, y=data['close'], mode='lines', name='Price', line=dict(color='blue', width=0.5)))
+        fig.add_trace(go.Scatter(x=data.index, y=filtered_close_series, mode='lines', name='Gefilterde Price (Std: 1, Poles: 1)', line=dict(color='green', width=0.5)))
         fig.add_trace(go.Scatter(x=data.index, y=ema1_series, mode='lines', name='EMA (3)', line=dict(color='orange', width=0.5)))
         pio.show(fig)
         
@@ -395,7 +421,7 @@ class TACharts:
         filtered_close_series1 = self.std_filtered_gaussian(data['close'], sigma=5, n_poles=1)
         filtered_close_series2 = self.std_filtered_gaussian(data['close'], sigma=20, n_poles=1)
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=data.index, y=data['close'], mode='lines', name='Prijs', line=dict(color='blue', width=0.5)))
+        fig.add_trace(go.Scatter(x=data.index, y=data['close'], mode='lines', name='Price', line=dict(color='blue', width=0.5)))
         fig.add_trace(go.Scatter(x=data.index, y=filtered_close_series1, mode='lines', name='Filtered close (Std: 10, Poles: 1)', line=dict(color='green', width=0.5)))
         fig.add_trace(go.Scatter(x=data.index, y=filtered_close_series2, mode='lines', name='Filtered close (Std: 20, Poles: 1)', line=dict(color='purple', width=0.5)))
         pio.show(fig)
@@ -404,12 +430,12 @@ class TACharts:
         filtered_close_series1 = self.std_filtered_gaussian(data['close'], sigma=1, n_poles=1)
         filtered_close_series2 = self.std_filtered_gaussian(data['close'], sigma=1, n_poles=5)
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=data.index, y=data['close'], mode='lines', name='Prijs', line=dict(color='blue', width=2)))
+        fig.add_trace(go.Scatter(x=data.index, y=data['close'], mode='lines', name='Price', line=dict(color='blue', width=2)))
         fig.add_trace(go.Scatter(x=data.index, y=filtered_close_series1, mode='lines', name='Filtered close (Std: 1, Poles: 1)', line=dict(color='green', width=2)))
         fig.add_trace(go.Scatter(x=data.index, y=filtered_close_series2, mode='lines', name='Filtered close (Std: 1, Poles: 5)', line=dict(color='purple', width=2)))
         pio.show(fig)
         
-    def plot_gaussian_bands_plus_pivots(self, data, mrkt):
+    def plot_gaussian_historical_turning_points(self, data, mrkt):
         filtered_close = self.std_filtered_gaussian(data['close'], sigma=1, n_poles=1)
         filtered_high  = self.std_filtered_gaussian(data['high'], sigma=1, n_poles=1)
         filtered_low   = self.std_filtered_gaussian(data['low'], sigma=1, n_poles=1)
@@ -419,7 +445,7 @@ class TACharts:
         # Calculate the slope of the filtered data
         filtered_close = self.std_filtered_gaussian(data['close'], sigma=1, n_poles=1)
         slope = convolve1d(filtered_close, [1, 0, -1])
-        # Find peaks and valleys
+        # Identify retrospective turning points in a symmetrically smoothed series
         peak_indices   = np.where((slope[:-1] > 0) & (slope[1:] < 0))[0]
         valley_indices = np.where((slope[:-1] < 0) & (slope[1:] > 0))[0]
         fig = go.Figure()
@@ -427,16 +453,18 @@ class TACharts:
         fig.add_trace(go.Scatter(x=data.index, y=band_low, mode='lines', name='High Band - Resistance', line=dict(color='red', width=1, dash='dash')))
         fig.add_trace(go.Scatter(x=data.index, y=band_high, mode='lines', name='Low Band - Support', line=dict(color='green', width=1, dash='dash')))
         fig.add_trace(go.Scatter(x=data.index, y=filtered_close, mode='lines', name='Filtred Price (Std: 1, Poles: 1)', line=dict(color='gray', width=2)))
-        fig.add_trace(go.Scatter(x=data.index[peak_indices], y=filtered_close[peak_indices+1], marker_symbol="star-triangle-down",   marker=dict(size=10, color='red'), line=dict(color='black', width=1), mode='markers', name='Piek - Verkoop'))
-        fig.add_trace(go.Scatter(x=data.index[valley_indices], y=filtered_close[valley_indices], marker_symbol="star-triangle-up",  marker=dict(size=10, color='#90EE90'), line=dict(color='black', width=1), mode='markers', name='Dal - Koop'))
+        fig.add_trace(go.Scatter(x=data.index[peak_indices+1], y=filtered_close[peak_indices+1], marker_symbol="star-triangle-down",   marker=dict(size=10, color='red'), line=dict(color='black', width=1), mode='markers', name='Retrospective Peak'))
+        fig.add_trace(go.Scatter(x=data.index[valley_indices+1], y=filtered_close[valley_indices], marker_symbol="star-triangle-up",  marker=dict(size=10, color='#90EE90'), line=dict(color='black', width=1), mode='markers', name='Retrospective Trough'))
+        fig.add_annotation(text=("Retrospective analysis: Gaussian smoothing uses observations before and after each point. Markers are not real-time signals."),
+            xref="paper", yref="paper", x=0.5, y=1.08, showarrow=False, font=dict(size=11, color="gray"),)        
         fig.update_layout(xaxis_rangeslider_visible=True)
-        fig.update_layout(title='Gaussian Bands with Peak & Valley Trading Signals')
+        fig.update_layout(title='Gaussian-Smoothed Historical Turning Points')
         pio.show(fig)
 
     def do_gauss(self, i):
         Days = str(i)+'D'
         D = self._last_period(Days)     
-        self.plot_gaussian_bands_plus_pivots(D, self.MARKET)
+        self.plot_gaussian_historical_turning_points(D, self.MARKET)
         # plot_gaussian_ema(D)       # Plot Gaussian Filter  + EMA
         # plot_gaussian_trends(D)    # Plot Gaussian trends
         # plot_gaussian_poles(D)     # Plot Gaussian Filter  + EMA

@@ -5,6 +5,7 @@
 #
 import shutil
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 import pandas as pd
@@ -91,10 +92,57 @@ class TotalDatasetBuilderCollectDataTests(unittest.TestCase):
         recent_source = FakeRecentSource(self.recent_rows)
         self.builder.recent_source = recent_source
 
-        self.assertTrue(self.builder.collect_data())
+        self.assertTrue(self.builder.collect_data(open_candle="include"))
 
         self.assertEqual(recent_source.calls, [("BONKUSDT", self.builder.COLUMNS, "1h", 500)])
         self.assertTrue(Path(self.builder.current_data).exists())
+
+    def test_collect_data_excludes_unfinished_candle_by_default(self):
+        class FakeRecentSource:
+            def __init__(self, rows):
+                self.rows = rows
+
+            def fetch_recent_klines(self, market, columns, interval="1h", limit=500):
+                return pd.DataFrame(self.rows, columns=columns)
+
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        closed_row = list(self.recent_rows[0])
+        closed_row[0] = now_ms - 7_200_000
+        closed_row[6] = now_ms - 3_600_001
+        open_row = list(self.recent_rows[0])
+        open_row[0] = now_ms - 3_600_000
+        open_row[6] = now_ms + 3_599_999
+        self.builder.recent_source = FakeRecentSource([closed_row, open_row])
+
+        self.assertTrue(self.builder.collect_data())
+
+        df = pd.read_csv(self.builder.current_data)
+        self.assertEqual(len(df), 1)
+        self.assertEqual(int(df["open_time"].iloc[0]), closed_row[0])
+
+    def test_collect_data_can_include_unfinished_candle(self):
+        class FakeRecentSource:
+            def __init__(self, rows):
+                self.rows = rows
+
+            def fetch_recent_klines(self, market, columns, interval="1h", limit=500):
+                return pd.DataFrame(self.rows, columns=columns)
+
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        closed_row = list(self.recent_rows[0])
+        closed_row[6] = now_ms - 3_600_001
+        open_row = list(self.recent_rows[0])
+        open_row[6] = now_ms + 3_599_999
+        self.builder.recent_source = FakeRecentSource([closed_row, open_row])
+
+        self.assertTrue(self.builder.collect_data(open_candle="include"))
+
+        df = pd.read_csv(self.builder.current_data)
+        self.assertEqual(len(df), 2)
+
+    def test_collect_data_rejects_invalid_open_candle_policy(self):
+        with self.assertRaisesRegex(MakeTotalError, "Invalid open_candle policy"):
+            self.builder.collect_data(open_candle="maybe")
 
     def test_collect_data_rejects_empty_response(self):
         self.builder.recent_source = BinanceRestClient()
@@ -137,6 +185,10 @@ class TotalDatasetBuilderCollectDataTests(unittest.TestCase):
         out_file, rows = self.builder.merge_data()
 
         self.assertEqual(rows, 1)
+        self.assertEqual(
+            Path(out_file).name,
+            "BONKUSDT-spot-1h-total-2026-12-22T00-00-00Z--2026-12-22T00-00-00Z.csv",
+        )
         self.assertTrue(Path(out_file).exists())
         self.assertFalse((self.temp_dir / "_temp_merge").exists())
         self.assertEqual(list(self.temp_dir.glob("hdw-BONKUSDT-*")), [])
@@ -150,7 +202,7 @@ class TotalDatasetBuilderCollectDataTests(unittest.TestCase):
             "1797897600000,0.1,0.2,0.05,0.15,100,1797901199999,15,10,50,7.5,0",
             encoding="utf-8",
         )
-        output_file = self.temp_dir / "BONKUSDT-total.csv"
+        output_file = self.temp_dir / "BONKUSDT-spot-1h-total-2026-12-22T00-00-00Z--2026-12-22T00-00-00Z.csv"
         output_file.write_text("existing output", encoding="utf-8")
 
         with (

@@ -4,12 +4,17 @@
 # part of the HdW_crypto_data Project
 import json
 import os
+import sys
 from pathlib import Path
+
+# Support direct execution from any working directory in this source checkout.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
 # Import the package modules
 from hdw_crypto_data.binance_vision_dumper import BinanceVisionDumper
 from hdw_crypto_data.total_dataset_builder import TotalDatasetBuilder
 from hdw_crypto_data.total_dataset_loader  import TotalDatasetLoader
-from ta_charts                             import TACharts
+from examples.ta_charts                    import TACharts
 
 dump = False
 asset = "BONK"
@@ -19,8 +24,8 @@ if __name__ == "__main__":
     from multiprocessing import freeze_support
     freeze_support()
 
-    settings_path = "settings.json" if os.path.isfile("settings.json") else "..\\settings.json"
-    with open(settings_path, "r") as f:
+    settings_path = Path(__file__).resolve().parents[1] / "examples" / "settings.json"
+    with open(settings_path, "r", encoding="utf-8") as f:
         settings = json.load(f)
     quote = settings.get("quote_currency", "USDT")
     market = f"{asset.upper()}{quote}"

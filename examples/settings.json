@@ -1,6 +1,7 @@
 {
-    "spot": "./data",
-    "full_spot": "./data/spot",
-    "preferred_time_zone": "Europe/Amsterdam",
+    "spot": "D:\\Coding\\forecast\\",
+    "full_spot": "D:\\Coding\\forecast\\spot",
+    "crypto_icons": "D:\\Coding\\forecast\\gui\\crypto_icons",
+    "preferred_time_zone": "CET",
     "quote_currency": "USDT"
 }
