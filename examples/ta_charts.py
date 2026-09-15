@@ -327,7 +327,7 @@ class TACharts:
     def plot_graph(self, symbol, data, entry_prices, exit_prices):
         #  Plot close price and bollinger bands
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x = data.index, y = data['close'],   line=dict(color="blue", width=1.5), name="Price"))  
+        fig.add_trace(go.Scatter(x = data.index, y = data['close'],   line=dict(color="blue", width=1.5), name="Price"))
         fig.add_trace(go.Scatter(x = data.index, y = data['BB_high'], line=dict(color="orange", width=1), name="BB High"))
         fig.add_trace(go.Scatter(x = data.index, y = data['BB_mid'],  line=dict(color="#ffd866", width=1), name="BB Mid"))
         fig.add_trace(go.Scatter(x = data.index, y = data['BB_low'],  line=dict(color="orange", width=1), name="BB Low"))
@@ -336,7 +336,7 @@ class TACharts:
         #  fig.add_trace(go.Scatter(x = data.index, y = data['STC'], line=dict(color="gray", width=1), name="STC"), row = 2, col = 1)
         #  Add buy and sell indicators
         fig.add_trace(go.Scatter(x=data.index, y=entry_prices, marker_symbol="star-triangle-up",  marker=dict(size=10, color='#90EE90'), line=dict(color='black', width=1), mode='markers',name='Buy'))
-        fig.add_trace(go.Scatter(x=data.index, y=exit_prices, marker_symbol="star-triangle-down", marker=dict(size=10, color='red'), line=dict(color='black', width=1), mode='markers',name='Sell'))   
+        fig.add_trace(go.Scatter(x=data.index, y=exit_prices, marker_symbol="star-triangle-down", marker=dict(size=10, color='red'), line=dict(color='black', width=1), mode='markers',name='Sell'))
         fig.update_layout(title={'text':f"{symbol} with Bollinger Bands", 'x':0.5})
         fig.update_layout(xaxis_rangeslider_visible=True)
         pio.show(fig) 
@@ -456,7 +456,7 @@ class TACharts:
         fig.add_trace(go.Scatter(x=data.index[peak_indices+1], y=filtered_close[peak_indices+1], marker_symbol="star-triangle-down",   marker=dict(size=10, color='red'), line=dict(color='black', width=1), mode='markers', name='Retrospective Peak'))
         fig.add_trace(go.Scatter(x=data.index[valley_indices+1], y=filtered_close[valley_indices], marker_symbol="star-triangle-up",  marker=dict(size=10, color='#90EE90'), line=dict(color='black', width=1), mode='markers', name='Retrospective Trough'))
         fig.add_annotation(text=("Retrospective analysis: Gaussian smoothing uses observations before and after each point. Markers are not real-time signals."),
-            xref="paper", yref="paper", x=0.5, y=1.08, showarrow=False, font=dict(size=11, color="gray"),)        
+            xref="paper", yref="paper", x=0.5, y=1.08, showarrow=False, font=dict(size=11, color="gray"),)
         fig.update_layout(xaxis_rangeslider_visible=True)
         fig.update_layout(title='Gaussian-Smoothed Historical Turning Points')
         pio.show(fig)
