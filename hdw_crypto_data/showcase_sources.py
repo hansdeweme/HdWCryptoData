@@ -1,12 +1,14 @@
 """Application-owned market data contract and optional source adapters."""
+# Copyright (c) 2025, 2026 Hans De Weme
+# Licensed under the MIT License (https://opensource.org/licenses/MIT).
+# part of the HdW_crypto_data Project
+#
 from dataclasses import dataclass
 from importlib.util import find_spec
 from pathlib import Path
 import pandas as pd
 
-
 SOURCE_PACKAGES = ('hdw_stock_data', 'hdw_crypto_data')
-
 
 def source_availability():
     """Check discoverability without importing optional acquisition pipelines.
@@ -67,7 +69,6 @@ class StockRequest:
     days: int = 730
     timezone: str = 'UTC'
 
-
 @dataclass(frozen=True)
 class CryptoRequest:
     symbol: str
@@ -76,7 +77,6 @@ class CryptoRequest:
     timezone: str = 'UTC'
     download_archives: bool = True
     force_merge: bool = False
-
 
 class StockSourceAdapter:
     def __init__(self, loader=None):

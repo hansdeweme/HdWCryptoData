@@ -3,13 +3,30 @@
 # Public exports for an importable CryptoData package.
 # ``hdw_crypto_data`` package directory.
 
-from .binance_rest_client    import BinanceRestClient
-from .binance_vision_dumper  import ArchiveDownloadResult, ArchiveDownloadStatus, BinanceVisionDumper, BinanceVisionDumpError
-from .total_dataset_builder  import MakeTotalError, MakeTotalResult, TotalDatasetBuilder
-from .total_dataset_loader   import TotalDatasetLoader
-from .symbols                import SYMBOL_PATTERN, normalize_market_symbol, normalize_symbol
+from .binance_rest_client import BinanceRestClient
+from .binance_vision_dumper import (
+    ArchiveDownloadResult,
+    ArchiveDownloadStatus,
+    BinanceVisionDumpError,
+    BinanceVisionDumper,
+)
+from .symbols import (
+    SYMBOL_PATTERN,
+    normalize_market_symbol,
+    normalize_symbol,
+)
+from .total_dataset_builder import (
+    MakeTotalError,
+    MakeTotalResult,
+    TotalDatasetBuilder,
+)
+from .total_dataset_loader import TotalDatasetLoader
+from .version import VERSION as __version__
+
+
 
 __all__ = [
+    "__version__",
     "BinanceRestClient",
     "BinanceVisionDumper",
     "BinanceVisionDumpError",
@@ -23,5 +40,3 @@ __all__ = [
     "normalize_market_symbol",
     "normalize_symbol",
 ]
-
-from .version import VERSION as __version__

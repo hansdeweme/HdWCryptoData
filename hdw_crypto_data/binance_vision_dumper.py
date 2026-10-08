@@ -9,6 +9,7 @@ import os
 import shutil
 import zipfile
 import datetime
+import logging
 from pathlib                import Path
 from dataclasses            import dataclass
 from enum                   import Enum
@@ -162,6 +163,12 @@ def _download_and_extract_task(
             return ArchiveDownloadResult(date_obj, ArchiveDownloadStatus.EXTRACTION_FAILURE, str(ex))
     finally:
         local_zip_path.unlink(missing_ok=True)
+    if asset_class.lower() == "spot":
+        try:
+            from .archive_index import notify_committed_file
+            notify_committed_file(local_csv_path)
+        except ImportError as exc:
+            logging.getLogger(__name__).warning("CSV committed; optional index unavailable: %s", exc)
     return ArchiveDownloadResult(date_obj, ArchiveDownloadStatus.DOWNLOADED)
 
 class BinanceVisionDumper:
@@ -418,6 +425,12 @@ class BinanceVisionDumper:
                 file_path = os.path.join(str_folder, str_filename)
                 try:
                     os.remove(file_path)
+                    if self._asset_class.lower() == "spot":
+                        try:
+                            from .archive_index import notify_removed_file
+                            notify_removed_file(self.path_dir_where_to_dump, file_path)
+                        except ImportError as exc:
+                            logging.getLogger(__name__).warning("File removed; optional index unavailable: %s", exc)
                     deleted_count += 1
                 except Exception as ex:
                     print(f"[Warning] Unable to delete file {file_path}: {ex}")

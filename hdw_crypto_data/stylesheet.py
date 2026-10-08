@@ -139,3 +139,55 @@ QCheckBox::indicator:checked {
     border-color: #3182ce;
 }
 """
+
+# Archive-specific refinements leave the showcase's existing theme unchanged.
+ARCHIVE_MANAGER_STYLE = DARK_STYLE + """
+QWidget { font-family: "Segoe UI"; }
+QTableWidget {
+    alternate-background-color: #171e2a;
+    selection-background-color: #2b6cb0;
+    selection-color: #ffffff;
+}
+QTableWidget::item:selected {
+    background-color: #2b6cb0;
+    color: #ffffff;
+}
+QTextEdit {
+    background-color: #1a202c;
+    border: 1px solid #2d3748;
+    border-radius: 6px;
+    padding: 8px;
+}
+QLabel#sectionHeading {
+    color: #90cdf4;
+    font-weight: bold;
+    padding: 3px 0;
+}
+QLabel#quarantineLocation {
+    color: #a0aec0;
+}
+QPushButton#previewBtn:enabled {
+    background-color: #319795;
+    border: 1px solid #4fd1c5;
+    padding: 8px 16px;
+}
+QPushButton#previewBtn:enabled:hover { background-color: #38b2ac; }
+QPushButton#previewBtn:enabled:pressed { background-color: #287e7c; }
+QPushButton#deleteAssetBtn:enabled, QPushButton#confirmDeleteBtn:enabled {
+    background-color: #c53030;
+}
+QPushButton#deleteAssetBtn:enabled:hover, QPushButton#confirmDeleteBtn:enabled:hover {
+    background-color: #e53e3e;
+}
+QPushButton#deleteAssetBtn:enabled:pressed, QPushButton#confirmDeleteBtn:enabled:pressed {
+    background-color: #9b2c2c;
+}
+QSplitter::handle { background-color: #2d3748; }
+QScrollBar:vertical { background-color: #12161f; width: 12px; }
+QScrollBar:horizontal { background-color: #12161f; height: 12px; }
+QScrollBar::handle:vertical { background-color: #4a5568; min-height: 24px; border-radius: 4px; }
+QScrollBar::handle:horizontal { background-color: #4a5568; min-width: 24px; border-radius: 4px; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
+QScrollBar::add-page, QScrollBar::sub-page { background: none; }
+"""

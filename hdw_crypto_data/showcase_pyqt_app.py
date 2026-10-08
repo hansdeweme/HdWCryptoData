@@ -1,6 +1,8 @@
-# Copyright (c) 2025, 2026 Hans De Weme
-# Licensed under the MIT License.
 """Shared market showcase with optional acquisition and canonical DataFrame input."""
+# Copyright (c) 2025, 2026 Hans De Weme
+# Licensed under the MIT License (https://opensource.org/licenses/MIT).
+# part of the HdW_crypto_data Project
+#
 import json
 import os
 import re
@@ -14,15 +16,9 @@ from PyQt6.QtCore import QThread, pyqtSignal, Qt, QSize
 from PyQt6.QtGui import QIcon, QColor
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QListWidgetItem, QTableWidgetItem, QFileDialog, QMessageBox)
 # local imports
-if __package__:
-    from .showcase_ui import build_ui
-    from .stylesheet import DARK_STYLE
-    from .showcase_sources import (MarketDataset, StockRequest, CryptoRequest, AcquisitionController, load_csv, SOURCE_PACKAGES, source_availability)
-else:
-    from showcase_ui import build_ui
-    from stylesheet import DARK_STYLE
-    from showcase_sources import (MarketDataset, StockRequest, CryptoRequest, AcquisitionController, load_csv, SOURCE_PACKAGES, source_availability)
-
+from .showcase_ui import build_ui
+from .stylesheet import DARK_STYLE
+from .showcase_sources import (MarketDataset, StockRequest, CryptoRequest, AcquisitionController, load_csv, SOURCE_PACKAGES, source_availability)
 
 class PipelineWorker(QThread):
     dataset_ready = pyqtSignal(object)
@@ -77,10 +73,13 @@ class MiniDumperApp(QMainWindow):
             self.add_dataset(dataset)
 
     def load_settings(self):
-        root = Path(__file__).resolve().parent
+        root = Path.cwd()
+        candidates = (root / 'settings.json',
+                      Path(__file__).resolve().parent.parent / 'examples' / 'settings.json')
+        path = next((candidate for candidate in candidates if candidate.is_file()), candidates[0])
+        root = path.parent
         settings = {'spot': str(root / 'spot'), 'quote_currency': 'USDT',
                     'preferred_time_zone': 'UTC'}
-        path = root / 'settings.json'
         if path.exists():
             settings.update(json.loads(path.read_text(encoding='utf-8')))
         for key in ('spot', 'stock_icons', 'crypto_icons'):
@@ -350,10 +349,7 @@ class MiniDumperApp(QMainWindow):
 
     def build_ta_charts(self, key):
         if key not in self.chart_info_cache:
-            if __package__:
-                from .ta_charts import TACharts
-            else:
-                from ta_charts import TACharts
+            from .ta_charts import TACharts
             dataset = self.datasets[key]
             self.chart_info_cache[key] = TACharts(dataset.symbol, dataset.dataframe.copy(deep=True))
         return self.chart_info_cache[key]
@@ -376,6 +372,7 @@ class MiniDumperApp(QMainWindow):
                       'sma': 'plot_sma', 'sim': 'do_sim', 'gauss': 'do_gauss'}[key]
             getattr(info, method)(period)
         except Exception as exc:
+            print(f'[Error] Chart failed: {exc}', flush=True)
             QMessageBox.warning(self, 'Chart failed', str(exc))
 
     def open_csv(self):

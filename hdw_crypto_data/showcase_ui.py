@@ -1,4 +1,9 @@
 """Styled widget layout for the shared showcase; source logic lives elsewhere."""
+# Copyright (c) 2025, 2026 Hans De Weme
+# Licensed under the MIT License (https://opensource.org/licenses/MIT).
+# part of the HdW_crypto_data Project
+#
+#PyQt imports
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QLineEdit,

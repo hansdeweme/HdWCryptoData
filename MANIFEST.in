@@ -1,0 +1,4 @@
+exclude README.md
+include readme.md changelog.md archive_manager.md archive_index.md requirements.txt
+recursive-include examples *.py *.json
+recursive-include tests *.py

@@ -2,9 +2,13 @@
 
 Utilities for downloading Binance Vision candlestick data, merging it with recent Binance API candles, and loading cleaned crypto time-series datasets for analysis.
 
-The core package is intentionally kept lightweight. GUI tools and technical-analysis chart helpers live outside the `hdw_crypto_data` package so heavy optional dependencies do not get imported with the core data pipeline.
+The core package is intentionally kept lightweight. GUI tools and technical-analysis chart helpers are optional package modules; heavy dependencies are imported only when those tools are used.
 
 Repository: <https://github.com/hansdeweme/HdWCryptoData>
+
+Version 0.4.0 adds the local Crypto Archive Manager and shared SQLite archive index.
+See [the changelog](changelog.md) for release details. The Showcase App opens
+standalone HTML charts and logs chart paths and calculation errors to the terminal.
 
 ## What It Does
 
@@ -32,21 +36,17 @@ from hdw_crypto_data import BinanceVisionDumper, TotalDatasetBuilder, TotalDatas
 
 ## Installation
 
-The core package supports Python 3.11 or newer. Use Python 3.13 for the optional analysis tools and showcase. From the repository root:
+The core package supports Python 3.11 or newer. Python 3.13 is recommended for the optional chart dependencies. From the repository root:
 
 ```powershell
 py -3.13 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -e .
+py -m pip install -e .
+# Optional GUI and chart tools:
+py -m pip install -e ".[gui]"
 ```
 
-Optional extras are `parallel` (mpire), `analysis` (charting and spreadsheet helpers), and `gui` (analysis tools plus PyQt6):
-
-```powershell
-python -m pip install -e ".[gui,parallel]"
-```
-
-The root `requirements.txt` contains pinned acquisition dependencies; it does not install the project or the GUI extras.
+The optional GUI and chart files may need extra packages such as PyQt6, Plotly, pandas-ta, ta, SciPy, and openpyxl.
 
 ## Folder Layout
 
@@ -63,20 +63,28 @@ HdWCryptoData/
     total_dataset_builder.py
     total_dataset_loader.py
     symbols.py
-  examples/
-    binance_dump.py
-    settings.json
+    archive_paths.py
+    archive_index.py
+    archive_manager.py
+    archive_manager_gui.py
     showcase_pyqt_app.py
     showcase_sources.py
     showcase_ui.py
     stylesheet.py
     ta_charts.py
+  examples/
+    binance_dump.py
+    settings.json
+    ta_charts.py              # compatibility imports
   tests/
     smoke_test.py
     test_*.py
   pyproject.toml
   requirements.txt
   readme.md
+  changelog.md
+  archive_manager.md
+  archive_index.md
 ```
 
 Typical Binance Vision data layout under `full_spot`:
@@ -89,50 +97,28 @@ spot/
 
 ## Optional Tools
 
-These files are outside the core package:
-
 - `examples/binance_dump.py` is a command-line runner for `BinanceVisionDumper`.
-- `examples/showcase_pyqt_app.py` is the shared PyQt6 market-data showcase.
-- `examples/showcase_sources.py` defines the common `MarketDataset` contract and optional stock/crypto adapters.
-- `examples/showcase_ui.py` and `examples/stylesheet.py` provide the interface and styling.
-- `examples/ta_charts.py` contains technical-analysis and Plotly chart helpers.
+- `python -m hdw_crypto_data.showcase_pyqt_app` launches the PyQt6 showcase.
+- `hdw_crypto_data.ta_charts` contains the optional analysis and Plotly helpers.
+- `python -m hdw_crypto_data.archive_manager_gui` launches the Archive Manager.
 
-These optional tools may require heavier dependencies such as PyQt6, Plotly, pandas-ta, ta, SciPy, and openpyxl.
-
-### Shared Stock and Crypto Showcase
-
-Install the GUI extra above, then install the optional stock package to enable both sources:
-
-```powershell
-python -m pip install hdw-stock-data
-# Alternatively, install the neighboring source checkout:
-python -m pip install -e ..\HdWStockData
-```
-
-Launch from the repository root:
-
-```powershell
-python -m examples.showcase_pyqt_app
-```
-
-Direct execution with `python examples/showcase_pyqt_app.py` is also supported. These example files belong to the source checkout and are not installed with the core package.
-
-The app supports hourly Yahoo stock data through `hdw_stock_data` and hourly Binance crypto data through `hdw_crypto_data`. Missing source packages disable acquisition for that source; CSV import and supplied DataFrames remain available. Restart after installing a missing package.
-
-CSV import expects a `dt` column containing timestamps with explicit timezone offsets, plus numeric `open`, `high`, `low`, `close`, and `volume` columns. Rows must be nonempty, sorted, and have unique timestamps. `number_of_trades` is optional. Raw Binance total CSVs must first be loaded with `TotalDatasetLoader` and exported using `df.to_csv("market.csv", index_label="dt")`.
-
-For an existing DataFrame, use `MarketDataset.from_dataframe(df, symbol="AAPL", interval="1h")` from `examples.showcase_sources`, then pass the result to `MiniDumperApp(datasets=[dataset])` from `examples.showcase_pyqt_app` after creating a `QApplication`. The DataFrame must have the same numeric columns and a sorted, unique, timezone-aware `DatetimeIndex`.
+Install the `gui` extra for these GUI and chart tools.
 
 ## Settings
 
-The example settings file is `examples/settings.json`. Edit its machine-specific paths before running acquisition:
+Most examples use a `settings.json` file. The download script defaults to
+`examples/settings.json`. The showcase checks the working directory first, then
+`examples/settings.json` in a source checkout. Relative paths are resolved beside
+the selected settings file. The Archive Manager checks the working directory.
+For an installed package, create `settings.json` in your working directory.
+
+Example:
 
 ```json
 {
   "spot": "D:\\Coding\\forecast\\",
   "full_spot": "D:\\Coding\\forecast\\spot",
   "crypto_icons": "D:\\Coding\\forecast\\crypto_icons",
-  "stock_icons": "D:\\Coding\\forecast\\stock_icons",
   "preferred_time_zone": "CET",
   "quote_currency": "USDT",
   "open_candle": "exclude"
@@ -140,8 +126,6 @@ The example settings file is `examples/settings.json`. Edit its machine-specific
 ```
 
 `full_spot` should point to the directory containing the spot data tree. The dumper handles both `base/spot/...` and `base/...` layouts where possible. `open_candle` controls recent REST candles: `exclude` omits unfinished live candles, while `include` keeps them for dashboards or live inspection.
-
-The showcase always reads settings beside its script. Its crypto adapter uses `spot` as the archive base and derives `full_spot` from it. Relative `spot`, `stock_icons`, and `crypto_icons` paths in the showcase resolve against `examples/`; icon directories are optional. The download CLI also defaults to the settings file beside its script, accepts `--settings PATH`, and prefers `full_spot` over `spot`. Use absolute data paths when sharing settings with the core package or CLI, where relative data paths resolve against the working directory.
 
 ## Basic Usage
 
@@ -172,7 +156,7 @@ rest_client = BinanceRestClient()
 
 builder = TotalDatasetBuilder(
     "BONK",
-    "examples/settings.json",
+    "settings.json",
     force_merge=False,
     historical_source=vision_dumper,
     recent_source=rest_client,
@@ -200,12 +184,10 @@ Load a total dataset:
 ```python
 from hdw_crypto_data import TotalDatasetLoader
 
-loader = TotalDatasetLoader("BONK", "examples/settings.json")
+loader = TotalDatasetLoader("BONK", "settings.json")
 df = loader.load_total_dataframe(mode="ta", preferred_tz="CET")
 print(df.tail())
 ```
-
-Automatic discovery selects the most recently modified total CSV matching both the market and `data_frequency` setting (default `1h`) in the working directory. If none matches, it falls back to the legacy `<MARKET>-total.csv` filename. Pass `file_path=result.filepath` to load a specific build output.
 
 By default the loader cleans the data without synthesizing missing candles:
 
@@ -225,27 +207,50 @@ synthetic_rows = df[df["is_imputed"]]
 Run the small download script from the project root:
 
 ```powershell
-python examples/binance_dump.py BONK
-python examples/binance_dump.py BONK --start 2026-08-01 --end 2026-08-21
+py -3 examples/binance_dump.py BONK
+py -3 examples/binance_dump.py BONK --start 2026-08-01 --end 2026-08-21
 ```
 
 The CLI exits normally on success and prints `* * * KLAAR * * *`. Argument errors are handled by `argparse`. Download failures raise `BinanceVisionDumpError`, so the process exits non-zero and prints the exception traceback unless you catch it from your own wrapper.
 
-## Testing
+## Local archive manager
 
-Install the analysis extra for the chart tests, then run the unit tests from the repository root:
+Launch the PyQt6 inventory and recoverable cleanup utility from the project environment:
 
 ```powershell
-python -m pip install -e ".[analysis]"
-$env:NUMBA_DISABLE_JIT='1'
-python -m unittest discover -s tests -p "test*.py"
+python -m hdw_crypto_data.archive_manager_gui
 ```
 
-`NUMBA_DISABLE_JIT=1` avoids optional pandas-ta/numba cache issues when importing chart tests. `tests/smoke_test.py` is a manual end-to-end script and is not part of unit-test discovery. Run it with `python tests/smoke_test.py`; it reads `examples/settings.json` and requires network access and suitable historical data.
+Choose `spot` or its parent, scan, inspect symbol/interval groups, and select
+individual files. A shared SQLite index under `.hdw_archive` beside `spot` supplies
+cached inventory immediately; background verification inspects only new or changed
+CSV contents. Writers update the index after successful commits. **Refresh / Verify**,
+**Deep rescan selected**, and **Rebuild index** offer incremental and forced repair.
+Cleanup requires a preview and explicit confirmation, then moves files to
+`.hdw_archive/quarantine` with a JSON manifest (existing `spot-quarantine` folders
+are reused). Restore is available through a tested core API and refuses overwrites.
+A separate **Quarantined assets…** overview offers a second cleanup level:
+permanently delete one whole quarantined asset across all intervals and operations,
+after preview and explicit confirmation. Active spot files remain untouched.
+See [archive manager documentation](archive_manager.md) for usage, restore
+examples, safety behavior and limitations. The existing `gui` extra includes PyQt6.
+See [shared index documentation](archive_index.md) for schema, ownership,
+concurrency, cache repair and benchmarks. The filesystem remains authoritative.
+
+## Testing
+
+Run the unit tests from the repository root:
+
+```powershell
+$env:NUMBA_DISABLE_JIT='1'
+py -m unittest discover -s tests -p "test*.py"
+```
+
+`NUMBA_DISABLE_JIT=1` avoids optional pandas-ta/numba cache issues when importing chart tests. `tests/smoke_test.py` is a manual end-to-end script and is not part of unit-test discovery.
 
 ## Notes
 
 The package downloads public market data from Binance endpoints. Network failures, missing Binance archives, checksum mismatches, rate limits, and invalid archives are reported explicitly by the dumper.
 
 Original design notes: <https://code2trade.dev/c>
- 
+

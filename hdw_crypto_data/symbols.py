@@ -1,5 +1,8 @@
 """Shared Binance symbol normalization and validation."""
-
+# Copyright (c) 2024 Hans De Weme
+# Licensed under the MIT License (https://opensource.org/licenses/MIT).
+# part of the HdW_crypto_data Project
+#
 from __future__ import annotations
 import re
 

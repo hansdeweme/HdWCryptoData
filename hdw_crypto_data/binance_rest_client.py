@@ -1,14 +1,12 @@
+"""Binance REST API client helpers."""
 # Copyright (c) 2026 Hans De Weme
 # Licensed under the MIT License (https://opensource.org/licenses/MIT).
 # part of the HdW_crypto_data Project
 #
-"""Binance REST API client helpers."""
-
 from __future__ import annotations
 from dataclasses import dataclass
 import pandas as pd
 import requests
-
 
 @dataclass
 class BinanceRestClient:

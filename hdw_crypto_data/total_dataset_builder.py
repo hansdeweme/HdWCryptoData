@@ -1,10 +1,9 @@
+"""Build total dataset CSVs from historical Binance Vision data and live candles."""
 # Copyright (c) 2024 Hans De Weme
 # Licensed under the MIT License (https://opensource.org/licenses/MIT).
 # part of the HdW_crypto_data Project
 # Purpose: Build total dataset CSVs from historical Binance Vision data and live candles
 #
-"""Build total dataset CSVs from historical Binance Vision data and live candles."""
-
 from __future__ import annotations
 import os
 import re
@@ -14,11 +13,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 import pandas as pd
-# local imports
 from dateutil.relativedelta import relativedelta
+# local imports
 from .binance_rest_client import BinanceRestClient
 from .total_dataset_loader import TotalDatasetLoader, total_dataset_filename
-
 
 @dataclass(frozen=True)
 class MakeTotalResult:
@@ -181,7 +179,14 @@ class TotalDatasetBuilder(TotalDatasetLoader):
 
         now_str = datetime.now().strftime("%Y-%m-%d")
         self.current_data = os.path.join(self.current_dir, f"{self.MARKET}-{now_str}.csv")
-        df.to_csv(self.current_data, index=False)
+        temporary = self.current_data + ".part"
+        try:
+            df.to_csv(temporary, index=False)
+            os.replace(temporary, self.current_data)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+        from .archive_index import notify_dataframe_committed_file
+        notify_dataframe_committed_file(self.current_data, df)
         print(f"[Info] Latest {len(df)} live {self.data_frequency} datapoints collected from Binance")
         return True
 
@@ -193,6 +198,11 @@ class TotalDatasetBuilder(TotalDatasetLoader):
         try:
             if hasattr(self, 'current_data') and os.path.exists(self.current_data):
                 shutil.move(self.current_data, os.path.join(work_dir, os.path.basename(self.current_data)))
+                from .archive_index import notify_removed_file
+                from .archive_paths import spot_root_for_file
+                source_root = spot_root_for_file(self.current_data)
+                if source_root is not None:
+                    notify_removed_file(source_root, self.current_data)
 
             monthly_count = 0
             if os.path.exists(self.MONTHS):
@@ -261,6 +271,8 @@ class TotalDatasetBuilder(TotalDatasetLoader):
             temporary = out_file + ".tmp"
             df_total.to_csv(temporary, index=False)
             os.replace(temporary, out_file)
+            from .archive_index import notify_dataframe_committed_file
+            notify_dataframe_committed_file(out_file, df_total)
             rows = len(df_total)
             print(f"[Info] Total dataset created: {rows:,} hourly rows")
             print(f"[Info] Saved to: {out_file}")

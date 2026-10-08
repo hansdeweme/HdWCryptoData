@@ -1,9 +1,11 @@
 # binance_vision_client.py
-# Part of the HdW_crypto_data package
-# Purpose: provide safe access to Binance Vision API
+# Copyright (c) 2025, 2026 Hans De Weme
+# Licensed under the MIT License (https://opensource.org/licenses/MIT).
+# part of the HdW_crypto_data Project
 #
 from __future__ import annotations
 import hashlib
+import logging
 from pathlib import Path
 from urllib.parse import urlparse
 import certifi
@@ -66,6 +68,12 @@ def download_file(
     except Exception:
         temporary.unlink(missing_ok=True)
         raise
+    if destination.suffix.lower() == ".csv":
+        try:
+            from .archive_index import notify_committed_file
+            notify_committed_file(destination)
+        except ImportError as exc:
+            logging.getLogger(__name__).warning("CSV committed; optional index unavailable: %s", exc)
 
 
 def _parse_checksum(checksum_text: str) -> str:
