@@ -220,8 +220,6 @@ def _inspect(record: FileRecord, root: Path, cancelled: Callable[[], bool]) -> F
         issues.append(ValidationIssue("coverage", "No observed timestamps"))
     elif first < record.advertised.start or last > record.advertised.end:
         issues.append(ValidationIssue("range", "Observed timestamps extend outside advertised range"))
-    elif first.date() != record.advertised.start.date() or last.date() != record.advertised.end.date():
-        issues.append(ValidationIssue("range", "Observed dates do not span advertised dates (possibly partial data)"))
     return replace(record, observed=CoverageRange(first, last), row_count=count,
                    status="Warning" if issues else "OK", issues=tuple(issues))
 

@@ -1,3 +1,12 @@
+## 0.4.1
+
+### Changed
+
+- Partial day/month coverage no longer produces an Archive Manager warning.
+- Automatically remove retired partial-period warnings from the shared index while
+  preserving other validation issues and updating changed record revisions.
+- Keep warnings for timestamps outside the advertised range and invalid data.
+
 ## 0.4.0
 
 ### Added

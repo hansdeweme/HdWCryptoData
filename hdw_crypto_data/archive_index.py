@@ -180,6 +180,22 @@ class ArchiveIndex:
             identity = json.dumps([self.root.stat().st_dev, self.root.stat().st_ino])
             if metadata.get("archive_root", str(self.root)) != str(self.root) or metadata.get("root_identity", identity) != identity:
                 raise ArchiveIndexIncompatibleError("Index belongs to a different archive root; explicit rebuild required")
+            # Retire the old partial-period warning in cached validation results too.
+            if metadata.get("partial_period_warning_retired") != "true":
+                retired = ["range", "Observed dates do not span advertised dates (possibly partial data)"]
+                revision = int(metadata.get("generation", "0")) + 1
+                changed = False
+                for row in connection.execute("SELECT relative_path, validation_status, issues_json FROM archive_file").fetchall():
+                    issues = json.loads(row["issues_json"])
+                    remaining = [issue for issue in issues if issue != retired]
+                    if remaining != issues:
+                        status = "OK" if not remaining and row["validation_status"] == "Warning" else row["validation_status"]
+                        connection.execute("UPDATE archive_file SET issues_json=?, validation_status=?, revision=? WHERE relative_path=?",
+                                           (json.dumps(remaining), status, revision, row["relative_path"]))
+                        changed = True
+                if changed:
+                    self._set(connection, "generation", revision)
+                self._set(connection, "partial_period_warning_retired", "true")
             for key, value in (("schema_version", SCHEMA_VERSION), ("archive_root", self.root), ("root_identity", identity)):
                 self._set(connection, key, value)
             for key, value in (("generation", "0"), ("reconciliation_complete", "false"),

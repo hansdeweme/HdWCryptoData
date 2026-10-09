@@ -20,6 +20,24 @@ from test_archive_manager import ArchiveFixture
 
 
 class ArchiveIndexTests(ArchiveFixture):
+    def test_retired_partial_period_warning_is_removed_from_cache(self):
+        self.file()
+        self.file("ETHUSDT")
+        index = ArchiveIndex(self.root)
+        index.verify_incremental()
+        retired = ["range", "Observed dates do not span advertised dates (possibly partial data)"]
+        other = ["timestamp", "1 rows with missing or invalid open timestamps"]
+        with index.transaction() as connection:
+            connection.execute("DELETE FROM index_metadata WHERE key='partial_period_warning_retired'")
+            connection.execute("UPDATE archive_file SET validation_status='Warning', issues_json=? WHERE symbol='BTCUSDT'", (json.dumps([retired]),))
+            connection.execute("UPDATE archive_file SET validation_status='Warning', issues_json=? WHERE symbol='ETHUSDT'", (json.dumps([retired, other]),))
+        fresh = ArchiveIndex(self.root)
+        records = {record.symbol: record for record in fresh.load_inventory().files}
+        self.assertEqual(records["BTCUSDT"].status, "OK")
+        self.assertEqual(records["BTCUSDT"].issues, ())
+        self.assertEqual(records["ETHUSDT"].status, "Warning")
+        self.assertEqual([issue.code for issue in records["ETHUSDT"].issues], ["timestamp"])
+
     def test_layout_schema_summary_and_connection_settings(self):
         first, second = self.file(), self.file("ETHUSDT")
         index = ArchiveIndex.for_spot_root(self.root)

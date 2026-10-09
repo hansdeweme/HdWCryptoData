@@ -122,13 +122,20 @@ class ScannerTests(ArchiveFixture):
         self.file(date="2026-02", period="monthly")
         record = am.scan_archive(self.root, "deep").files[0]
         self.assertEqual(record.advertised.end.day, 28)
-        self.assertIn("range", {i.code for i in record.issues})
+        self.assertEqual(record.status, "OK")
         def failed_walk(root, **kwargs):
             kwargs["onerror"](PermissionError("directory denied"))
             return iter(())
         with patch.object(am.os, "walk", failed_walk):
             inventory = am.scan_archive(self.root)
         self.assertEqual(inventory.issues[0].code, "directory")
+
+    def test_partial_month_is_ok(self):
+        timestamp = int(datetime(2026, 2, 15, tzinfo=timezone.utc).timestamp()) * 1000
+        self.file(date="2026-02", period="monthly", content=f"{timestamp},1\n")
+        record = am.scan_archive(self.root, "deep").files[0]
+        self.assertEqual(record.status, "OK")
+        self.assertEqual(record.issues, ())
 
     def test_invalid_root_mode_and_cancellation(self):
         self.file()

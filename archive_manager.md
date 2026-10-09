@@ -63,7 +63,9 @@ timestamp normalization; displayed timestamps have second precision. Optional
 the header. Empty, invalid, duplicate/out-of-order timestamps and range mismatches
 are reported. Validation focuses on timestamps, not every OHLCV field or expected
 candle continuity. Partial day/month coverage may be legitimate, such as a new
-listing, so it is a warning rather than a cleanup recommendation.
+listing, so it does not produce a warning. Timestamps outside the advertised range
+still produce a warning. Existing cached partial-period warnings are removed
+automatically when the index is opened.
 
 Summary coverage columns show **observed** coverage only, and remain Unknown for
 fast scans. Mixed or unreadable groups can have partial observed coverage; unknown
