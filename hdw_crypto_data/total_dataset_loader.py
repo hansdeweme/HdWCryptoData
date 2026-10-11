@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from .symbols import normalize_market_symbol
+from .intervals import normalize_interval
 
 DEFAULT_COLUMNS = [
     'open_time', 'open', 'high', 'low', 'close', 'volume',
@@ -63,16 +64,51 @@ class TotalDatasetLoader:
         self.COLUMNS = list(DEFAULT_COLUMNS)
         self.data_frequency = self.settings.get("data_frequency", "1h")
 
-    def find_total_dataset_file(self) -> str:
+    def find_total_dataset_file(self, *, interval: str | None = None) -> str:
         """Find the newest total CSV for this market and configured frequency."""
         current_path = Path(self.current_dir)
-        pattern = TOTAL_DATASET_GLOB.format(market=self.MARKET, frequency=self.data_frequency)
+        frequency = self.data_frequency if interval is None else normalize_interval(interval)
+        pattern = TOTAL_DATASET_GLOB.format(market=self.MARKET, frequency=frequency)
         candidates = [path for path in current_path.glob(pattern) if path.is_file()]
         if candidates:
             return str(max(candidates, key=lambda path: path.stat().st_mtime))
 
-        legacy_path = current_path / f"{self.MARKET}-total.csv"
+        # Zero-argument calls preserve the historical fallback behavior.
+        suffix = f"-{frequency}" if interval is not None and frequency != "1h" else ""
+        legacy_path = current_path / f"{self.MARKET}{suffix}-total.csv"
         return str(legacy_path)
+
+    def load_research_dataframe(
+        self,
+        file_path: str | None = None,
+        interval: str = "1h",
+        preferred_tz: str = "UTC",
+    ) -> pd.DataFrame:
+        """Load exact observations, retaining order, duplicates, NaT and gaps.
+
+        No cleaning, filling, resampling, row deletion or side-file writes occur.
+        Malformed numeric values become NaN for downstream validation.
+        """
+        interval = normalize_interval(interval)
+        if file_path is None:
+            file_path = self.find_total_dataset_file(interval=interval)
+        df = pd.read_csv(file_path)
+        if list(df.columns) != self.COLUMNS and len(df.columns) == len(self.COLUMNS):
+            df.columns = self.COLUMNS
+        raw_time = pd.to_numeric(df["open_time"], errors="coerce")
+        timestamps = pd.Series(pd.NaT, index=df.index, dtype="datetime64[ns, UTC]")
+        # Parse in the original units: float seconds can lose microsecond precision.
+        masks = {"us": raw_time > 1e14,
+                 "ms": (raw_time > 1e11) & (raw_time <= 1e14),
+                 "s": raw_time <= 1e11}
+        for unit, mask in masks.items():
+            values = raw_time.loc[mask].astype("Int64")
+            timestamps.loc[mask] = pd.to_datetime(values, unit=unit, utc=True, errors="coerce")
+        df.index = pd.DatetimeIndex(timestamps).tz_convert(preferred_tz)
+        df.index.name = "dt"
+        for column in df.columns:
+            df[column] = pd.to_numeric(df[column], errors="coerce")
+        return df
 
     def convert_dataframe_timezone(self, df: pd.DataFrame, preferred_tz: str = None) -> pd.DataFrame:
         if preferred_tz is None:

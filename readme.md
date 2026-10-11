@@ -6,7 +6,8 @@ The core package is intentionally kept lightweight. GUI tools and technical-anal
 
 Repository: <https://github.com/hansdeweme/HdWCryptoData>
 
-Version 0.4.0 adds the local Crypto Archive Manager and shared SQLite archive index.
+Version 0.5.0 adds interval-aware total datasets and strict research loading.
+The local Crypto Archive Manager and shared SQLite archive index remain available.
 See [the changelog](changelog.md) for release details. The Showcase App opens
 standalone HTML charts and logs chart paths and calculation errors to the terminal.
 
@@ -17,7 +18,8 @@ standalone HTML charts and logs chart paths and calculation errors to the termin
 - stores monthly and daily spot kline data in the Binance Vision folder layout
 - merges historical files with recent live Binance candle data
 - writes a self-documenting total dataset name, for example `BONKUSDT-spot-1h-total-2026-12-22T00-00-00Z--2026-12-22T23-00-00Z.csv`
-- loads total datasets into pandas DataFrames with timezone handling and optional gap filling
+- loads exact UTC observations for research without filling missing candles
+- retains cleaned pandas DataFrame loading with timezone handling and optional gap filling for visualization
 
 ## Core Modules
 
@@ -33,6 +35,32 @@ Public imports are available from the package root:
 ```python
 from hdw_crypto_data import BinanceVisionDumper, TotalDatasetBuilder, TotalDatasetLoader
 ```
+
+## Strict Research Data (0.5.0)
+
+Use an explicit interval (`15m`, `1h` or `1d`) when building or locating total
+research datasets. The legacy builder default remains `1h`.
+
+```python
+from hdw_crypto_data import TotalDatasetBuilder, TotalDatasetLoader
+
+# Explicit update: build a total dataset and omit the open live candle.
+result = TotalDatasetBuilder("BONK", settings, interval="15m").build(
+    open_candle="exclude")
+
+# Exact observations: no sorting, deduplication, interpolation or side files.
+loader = TotalDatasetLoader("BONK", settings, current_dir=total_directory)
+frame = loader.load_research_dataframe(
+    file_path=result.filepath, interval="15m", preferred_tz="UTC")
+
+# Read-only: discover an existing hourly total without building/updating it.
+hourly = loader.load_research_dataframe(interval="1h", preferred_tz="UTC")
+```
+
+The strict loader preserves internal gaps, duplicates, row order and malformed
+values; callers must validate observations before analyzing them. It parses
+second, millisecond and microsecond timestamps in their original units. Use
+`load_total_dataframe()` for the existing optional cleaning/visualization path.
 
 ## Installation
 

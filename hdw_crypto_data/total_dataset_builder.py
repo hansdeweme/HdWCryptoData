@@ -16,6 +16,7 @@ import pandas as pd
 from dateutil.relativedelta import relativedelta
 # local imports
 from .binance_rest_client import BinanceRestClient
+from .intervals import normalize_interval
 from .total_dataset_loader import TotalDatasetLoader, total_dataset_filename
 
 @dataclass(frozen=True)
@@ -24,6 +25,7 @@ class MakeTotalResult:
     filepath: str
     rows: int
     dataframe_message: str
+    interval: str = "1h"
 
 class MakeTotalError(RuntimeError):
     """Raised when total dataset creation cannot complete."""
@@ -42,8 +44,12 @@ class TotalDatasetBuilder(TotalDatasetLoader):
         force_merge=False,
         historical_source=None,
         recent_source: BinanceRestClient | None = None,
+        *,
+        interval: str | None = None,
     ):
         super().__init__(asset, settings)
+        self.interval = normalize_interval(self.data_frequency if interval is None else interval)
+        self.data_frequency = self.interval
         self.force_merge = force_merge
         self.historical_source = historical_source
         self.recent_source = recent_source or BinanceRestClient()
@@ -78,7 +84,8 @@ class TotalDatasetBuilder(TotalDatasetLoader):
             market=self.MARKET,
             filepath=filepath,
             rows=rows,
-            dataframe_message=f"Total dataset created ({rows:,} rows)",
+            dataframe_message=f"Total dataset created ({rows:,} {self.interval} rows)",
+            interval=self.interval,
         )
 
     def _resolve_kline_dir(self, base_dir: str, timeperiod: str) -> str:
@@ -158,7 +165,7 @@ class TotalDatasetBuilder(TotalDatasetLoader):
         return closed_df
 
     def collect_data(self, open_candle: str | None = None) -> bool:
-        """Fetch the latest 500 hourly candles from Binance REST API."""
+        """Fetch the latest 500 candles at the configured interval from Binance REST API."""
         policy = self.resolve_open_candle_policy(open_candle)
         try:
             df = self.recent_source.fetch_recent_klines(
@@ -178,7 +185,7 @@ class TotalDatasetBuilder(TotalDatasetLoader):
             raise MakeTotalError(self.MARKET, "No closed live candles returned by Binance")
 
         now_str = datetime.now().strftime("%Y-%m-%d")
-        self.current_data = os.path.join(self.current_dir, f"{self.MARKET}-{now_str}.csv")
+        self.current_data = os.path.join(self.current_dir, f"{self.MARKET}-{self.interval}-{now_str}.csv")
         temporary = self.current_data + ".part"
         try:
             df.to_csv(temporary, index=False)
@@ -191,7 +198,7 @@ class TotalDatasetBuilder(TotalDatasetLoader):
         return True
 
     def merge_data(self) -> tuple[str, int]:
-        """Merge historical monthly, daily, and live hourly candles into a total CSV."""
+        """Merge historical monthly, daily, and live candles at the configured interval into a total CSV."""
         os.makedirs(self.WORK, exist_ok=True)
         work_dir = os.path.join(self.WORK, f"hdw-{self.MARKET}-{uuid.uuid4().hex[:8]}")
         os.makedirs(work_dir, exist_ok=False)
@@ -274,7 +281,7 @@ class TotalDatasetBuilder(TotalDatasetLoader):
             from .archive_index import notify_dataframe_committed_file
             notify_dataframe_committed_file(out_file, df_total)
             rows = len(df_total)
-            print(f"[Info] Total dataset created: {rows:,} hourly rows")
+            print(f"[Info] Total dataset created: {rows:,} {self.interval} rows")
             print(f"[Info] Saved to: {out_file}")
             return out_file, rows
         finally:

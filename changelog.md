@@ -1,3 +1,23 @@
+## 0.5.0
+
+### Added
+
+- Strict `TotalDatasetLoader.load_research_dataframe()` for exact research
+  observations, preserving gaps, duplicates, ordering and malformed values for
+  downstream validation without interpolation, filling or side-file writes.
+- Explicit fixed-interval validation for `15m`, `1h` and `1d` research datasets.
+- Regression coverage for interval-aware acquisition, discovery, strict loading,
+  original timestamp precision and compatibility with existing hourly defaults.
+
+### Changed
+
+- `TotalDatasetBuilder(..., interval=...)` consistently selects the requested
+  archive, REST and merge interval; `MakeTotalResult` reports that interval.
+- Recent-data filenames include their interval to avoid cross-interval collisions.
+- Explicit interval-aware total-file discovery keeps intraday fallback files
+  separate while preserving zero-argument legacy hourly behavior.
+- Existing cleaned/visualization loading APIs remain available unchanged.
+
 ## 0.4.1
 
 ### Changed
