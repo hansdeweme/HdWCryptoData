@@ -15,7 +15,7 @@ python -m hdw_crypto_data.archive_manager_gui
 PyQt6 is already part of the project's `gui` extra (`pip install -e ".[gui]"`).
 The manager reuses the showcase's shared dark theme from
 `hdw_crypto_data.stylesheet`, with clearer table headings and red permanent-deletion
-actions. The top-level `stylesheet.py` keeps its existing `DARK_STYLE` import available
+actions. `examples/stylesheet.py` keeps the shared `DARK_STYLE` import available
 to the showcase.
 Example screenshots using synthetic data: [main window](archive_manager_preview.png),
 [quarantined assets](quarantine_assets_preview.png), and

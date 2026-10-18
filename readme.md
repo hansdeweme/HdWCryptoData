@@ -2,7 +2,7 @@
 
 Utilities for downloading Binance Vision candlestick data, merging it with recent Binance API candles, and loading cleaned crypto time-series datasets for analysis.
 
-The core package is intentionally kept lightweight. GUI tools and technical-analysis chart helpers are optional package modules; heavy dependencies are imported only when those tools are used.
+The core package is intentionally kept lightweight. The Archive Manager is an optional package module; the showcase app and technical-analysis chart helpers live in `examples/`. Heavy dependencies are imported only when those tools are used.
 
 Repository: <https://github.com/hansdeweme/HdWCryptoData>
 
@@ -95,15 +95,15 @@ HdWCryptoData/
     archive_index.py
     archive_manager.py
     archive_manager_gui.py
-    showcase_pyqt_app.py
-    showcase_sources.py
-    showcase_ui.py
     stylesheet.py
-    ta_charts.py
   examples/
     binance_dump.py
     settings.json
-    ta_charts.py              # compatibility imports
+    showcase_pyqt_app.py
+    showcase_sources.py
+    showcase_ui.py
+    stylesheet.py            # imports the shared package theme
+    ta_charts.py
   tests/
     smoke_test.py
     test_*.py
@@ -126,11 +126,12 @@ spot/
 ## Optional Tools
 
 - `examples/binance_dump.py` is a command-line runner for `BinanceVisionDumper`.
-- `python -m hdw_crypto_data.showcase_pyqt_app` launches the PyQt6 showcase.
-- `hdw_crypto_data.ta_charts` contains the optional analysis and Plotly helpers.
+- `python -m examples.showcase_pyqt_app` launches the PyQt6 showcase from the repository root.
+- `examples.ta_charts` contains the optional analysis and Plotly helpers.
 - `python -m hdw_crypto_data.archive_manager_gui` launches the Archive Manager.
 
 Install the `gui` extra for these GUI and chart tools.
+The showcase and chart helpers require a source checkout; they are not included in the installed wheel.
 
 ## Settings
 
