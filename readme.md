@@ -135,22 +135,23 @@ The showcase and chart helpers require a source checkout; they are not included 
 
 ## Settings
 
-Most examples use a `settings.json` file. The download script defaults to
-`examples/settings.json`. The showcase checks the working directory first, then
-`examples/settings.json` in a source checkout. Relative paths are resolved beside
-the selected settings file. The Archive Manager checks the working directory.
-For an installed package, create `settings.json` in your working directory.
+The download script and showcase use `examples/settings.json` by default.
+The showcase resolves relative paths against the repository root, independently
+of the working directory. Local icon folders default to `examples/stock_icons`
+and `examples/crypto_icons`; either folder may be absent. The Archive Manager
+checks the working directory for its own settings file. The showcase requires
+a source checkout.
 
-Example:
+Portable showcase settings:
 
 ```json
 {
-  "spot": "D:\\Coding\\forecast\\",
-  "full_spot": "D:\\Coding\\forecast\\spot",
-  "crypto_icons": "D:\\Coding\\forecast\\crypto_icons",
-  "preferred_time_zone": "CET",
+  "spot": ".",
+  "full_spot": "./spot",
+  "stock_icons": "examples/stock_icons",
+  "crypto_icons": "examples/crypto_icons",
   "quote_currency": "USDT",
-  "open_candle": "exclude"
+  "preferred_time_zone": "Europe/Amsterdam"
 }
 ```
 

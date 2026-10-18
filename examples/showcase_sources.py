@@ -107,7 +107,7 @@ class CryptoSourceAdapter:
         settings = dict(request.settings)
         settings['preferred_time_zone'] = request.timezone
         settings.setdefault('spot', str(Path(__file__).resolve().parent / 'spot'))
-        settings['full_spot'] = str(Path(settings['spot']).resolve())
+        settings['full_spot'] = str(Path(settings.get('full_spot') or settings['spot']).resolve())
         settings['quote_currency'] = quote
         if request.download_archives:
             dumper = BinanceVisionDumper(
