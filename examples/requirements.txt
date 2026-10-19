@@ -1,0 +1,8 @@
+hdw-ta>=0.1.0,<0.2.0
+PyQt6
+plotly
+pandas-ta
+ta
+scipy
+progressbar2
+openpyxl

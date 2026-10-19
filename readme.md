@@ -69,12 +69,14 @@ The core package supports Python 3.11 or newer. Python 3.13 is recommended for t
 ```powershell
 py -3.13 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-py -m pip install -e .
-# Optional GUI and chart tools:
-py -m pip install -e ".[gui]"
+py -m pip install hdw-crypto-data
+# Required when running the showcase and chart examples:
+py -m pip install -r examples/requirements.txt
 ```
 
-The optional GUI and chart files may need extra packages such as PyQt6, Plotly, pandas-ta, ta, SciPy, and openpyxl.
+For development, replace `py -m pip install hdw-crypto-data` with `py -m pip install -e .`; also install `examples/requirements.txt` to run the examples. The examples require a source checkout because they are not included in the installed wheel.
+
+The examples requirements install `hdw-ta` (imported as `hdw_ta`) for the Keltner calculations, plus PyQt6, Plotly, pandas-ta, ta, SciPy, progressbar2, and openpyxl for the GUI, charts, and Excel export. NumPy and pandas are installed by the core package.
 
 ## Folder Layout
 
@@ -97,6 +99,7 @@ HdWCryptoData/
     archive_manager_gui.py
     stylesheet.py
   examples/
+    requirements.txt
     binance_dump.py
     settings.json
     showcase_pyqt_app.py
@@ -130,7 +133,7 @@ spot/
 - `examples.ta_charts` contains the optional analysis and Plotly helpers.
 - `python -m hdw_crypto_data.archive_manager_gui` launches the Archive Manager.
 
-Install the `gui` extra for these GUI and chart tools.
+Install `examples/requirements.txt` for the showcase and chart helpers. For the Archive Manager alone, install the `gui` extra with `py -m pip install "hdw-crypto-data[gui]"`.
 The showcase and chart helpers require a source checkout; they are not included in the installed wheel.
 
 ## Settings
