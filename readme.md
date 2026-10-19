@@ -62,6 +62,64 @@ values; callers must validate observations before analyzing them. It parses
 second, millisecond and microsecond timestamps in their original units. Use
 `load_total_dataframe()` for the existing optional cleaning/visualization path.
 
+## Recent candles in memory
+
+`BinanceKlineClient` provides recent Spot data without archive downloads,
+temporary CSV files, logging, GUI imports or technical indicators:
+
+```python
+from hdw_crypto_data import BinanceKlineClient
+
+with BinanceKlineClient() as client:
+    df = client.get_klines("PEPEUSDT", interval="5m", limit=500)
+```
+
+The result has a sorted, unique UTC `DatetimeIndex` named `dt` and exactly six
+numeric columns: `open`, `high`, `low`, `close`, `volume` (float64), and
+`number_of_trades` (int64). Candle timestamps identify the candle's open time.
+Identical duplicate timestamps collapse; conflicting duplicates, invalid numeric
+values and inconsistent OHLC bounds raise `BinanceKlineResponseError`.
+Missing candles are not filled or interpolated. Short/new listings can return
+fewer rows (including an empty, correctly typed frame); callers enforce their
+own minimum lookback requirements.
+
+`get_klines(symbol, *, interval="1h", limit=500, closed_only=True)` accepts full
+Binance pair symbols and limits from 1 through 1000. Symbols are stripped and
+uppercased; intervals are case-sensitive (`1m` and `1M` are different). Spot
+intervals include `1s`, `1m`, `3m`, `5m`, `15m`, `30m`, `1h`, `2h`, `4h`, `6h`,
+`8h`, `12h`, `1d`, `3d`, `1w` and `1M`. The archive/research APIs retain their
+existing interval support and behavior.
+
+Completed candles are the default: Binance's inclusive close time must be
+strictly earlier than the UTC millisecond cutoff frozen before the call's first
+request. The request's `endTime` also bounds the snapshot. The client requests
+an extra candle and, when necessary at the 1000-row API ceiling, pages backward
+to preserve the requested completed history. This conservative rule does not
+admit a partial snapshot merely because the candle closes during retries or
+response processing. It relies on an accurate system clock. Use
+`closed_only=False` to explicitly include a possibly unfinished current candle.
+Returned `df.attrs` records `symbol`, `interval`, `closed_only` and
+`retrieval_cutoff_ms`.
+
+Constructor options are `timeout=(5, 15)` (connect/read seconds),
+`max_attempts=3`, `min_request_interval=0.25`, `backoff_factor=0.5`,
+`max_retry_wait=30.0` and an optional caller-owned requests-compatible `session`.
+One instance serializes calls, reuses its HTTP session, and spaces request starts.
+This is per-instance pacing; applications sharing an IP still coordinate their
+overall API usage. Transport failures and HTTP 5xx responses use bounded
+exponential backoff. HTTP 429 respects the full `Retry-After` cooldown; a long
+cooldown or HTTP 418 raises `BinanceRateLimitError` immediately, carrying
+`retry_after` (seconds) and `status_code` when supplied by the response. The
+instance remembers the cooldown across calls and never retries before it expires.
+Other HTTP failures raise `BinanceKlineError` without retrying; malformed data or
+JSON raises `BinanceKlineResponseError`. All three errors are public root exports.
+The client closes its own session via `close()` or the context manager and does
+not close an injected session. Closed clients cannot issue further requests.
+
+Offline checks: `py -3.13 -m unittest discover -s tests -p test_binance_kline_client.py -v`.
+API references: [Spot klines](https://developers.binance.com/en/docs/catalog/core-trading-spot-trading/api/rest-api/market)
+and [rate limits](https://developers.binance.com/en/docs/products/spot/rest-api).
+
 ## Installation
 
 The core package supports Python 3.11 or newer. Python 3.13 is recommended for the optional chart dependencies. From the repository root:

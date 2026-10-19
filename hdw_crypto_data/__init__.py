@@ -4,6 +4,12 @@
 # ``hdw_crypto_data`` package directory.
 
 from .binance_rest_client import BinanceRestClient
+from .binance_kline_client import (
+    BinanceKlineClient,
+    BinanceKlineError,
+    BinanceKlineResponseError,
+    BinanceRateLimitError,
+)
 from .binance_vision_dumper import (
     ArchiveDownloadResult,
     ArchiveDownloadStatus,
@@ -28,6 +34,10 @@ from .version import VERSION as __version__
 __all__ = [
     "__version__",
     "BinanceRestClient",
+    "BinanceKlineClient",
+    "BinanceKlineError",
+    "BinanceKlineResponseError",
+    "BinanceRateLimitError",
     "BinanceVisionDumper",
     "BinanceVisionDumpError",
     "ArchiveDownloadResult",
