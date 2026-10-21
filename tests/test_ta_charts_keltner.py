@@ -5,6 +5,7 @@
 
 import os
 import unittest
+from unittest.mock import patch
 import numpy as np
 import pandas as pd
 os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
@@ -20,21 +21,34 @@ class KeltnerSignalTests(unittest.TestCase):
         kc_upper = pd.Series([20.0, 20.0, 14.0, 20.0], index=index)
 
         chart = object.__new__(TACharts)
-        buy_price, sell_price, kc_signal = chart.implement_kc_strategy(prices, kc_upper, kc_lower)
+        chart.df = pd.DataFrame({
+            'close': prices,
+            'kc_upper': kc_upper,
+            'kc_lower': kc_lower,
+            'kc_middle': (kc_upper + kc_lower) / 2,
+        })
+        chart.MARKET = 'BONKUSDT'
+        # Exercise the chart's hdw-ta integration without opening a browser.
+        with patch.object(chart, '_show_chart') as show_chart:
+            chart.plot_keltner(1)
+        show_chart.assert_called_once()
+        traces = {trace.name: trace for trace in show_chart.call_args.args[0].data}
+        buy_trace, sell_trace = traces['Buy Signal'], traces['Sell Signal']
+        buy_price = pd.Series(buy_trace.y, index=pd.DatetimeIndex(buy_trace.x))
+        sell_price = pd.Series(sell_trace.y, index=pd.DatetimeIndex(sell_trace.x))
 
         self.assertIsInstance(buy_price, pd.Series)
         self.assertIsInstance(sell_price, pd.Series)
-        self.assertIsInstance(kc_signal, pd.Series)
         self.assertTrue(buy_price.index.equals(index))
         self.assertTrue(sell_price.index.equals(index))
-        self.assertTrue(kc_signal.index.equals(index))
         self.assertEqual(len(buy_price), len(prices))
         self.assertEqual(len(sell_price), len(prices))
         self.assertTrue(np.isnan(buy_price.iloc[0]))
         self.assertEqual(buy_price.iloc[1], prices.iloc[1])
         self.assertTrue(np.isnan(sell_price.iloc[2]))
         self.assertEqual(sell_price.iloc[3], prices.iloc[3])
-        self.assertEqual(kc_signal.tolist(), [0, 1, 0, -1])
+        self.assertEqual(buy_price.notna().tolist(), [False, True, False, False])
+        self.assertEqual(sell_price.notna().tolist(), [False, False, False, True])
 
 
 if __name__ == "__main__":

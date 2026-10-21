@@ -260,9 +260,24 @@ class TotalDatasetBuilder(TotalDatasetLoader):
                 raise MakeTotalError(self.MARKET, msg)
 
             df_total = pd.concat(df_list, ignore_index=True)
+            # Binance Vision uses microseconds for newer archives, while REST
+            # and older archives use milliseconds. Normalize before comparing
+            # timestamps so overlapping candles deduplicate and sort by time.
+            # Integer arithmetic preserves the original microsecond precision.
+            for column in ('open_time', 'close_time'):
+                if column not in df_total:
+                    continue
+                raw = pd.to_numeric(df_total[column], errors='coerce').astype('Int64')
+                normalized = raw.copy()
+                milliseconds = (raw > 10**11) & (raw <= 10**14)
+                seconds = raw <= 10**11
+                normalized.loc[milliseconds] = raw.loc[milliseconds] * 1000
+                normalized.loc[seconds] = raw.loc[seconds] * 1_000_000
+                df_total[column] = normalized
+            df_total = df_total.dropna(subset=['open_time'])
+            # Retain the existing first-source-wins overlap policy.
             df_total = df_total.drop_duplicates(subset=['open_time'])
-            df_total['open_time'] = pd.to_numeric(df_total['open_time'], errors='coerce')
-            df_total = df_total.dropna(subset=['open_time']).sort_values('open_time').reset_index(drop=True)
+            df_total = df_total.sort_values('open_time', kind='stable').reset_index(drop=True)
             if df_total.empty:
                 msg = "No rows with valid candle timestamps available to merge"
                 print(f"[Warning] {msg}")

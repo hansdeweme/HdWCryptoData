@@ -1,3 +1,24 @@
+## 0.6.1
+
+### Fixed
+
+- Normalize merged candle open/close timestamps to integer microseconds before
+  deduplication and chronological sorting. Mixed Binance Vision and REST epoch
+  units no longer leave duplicate candles, disorder the history, or produce an
+  incorrect filename range. Microsecond precision and the existing first-source
+  overlap policy are preserved; original archive inputs remain unchanged.
+- Add mixed seconds/milliseconds/microseconds regression coverage for 15m, 1h
+  and 1d total datasets, plus exact microsecond-precision checks.
+
+## 0.6.0
+
+### Added
+
+- Lightweight `BinanceKlineClient` for recent Spot candles in memory, with a
+  sorted, unique UTC index and validated OHLC, volume and trade-count columns.
+- Closed-candle filtering, bounded pagination, rate-limit errors and public
+  exception exports, plus mocked regression coverage and usage documentation.
+
 ## 0.5.0
 
 ### Added

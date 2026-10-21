@@ -6,7 +6,9 @@ The core package is intentionally kept lightweight. The Archive Manager is an op
 
 Repository: <https://github.com/hansdeweme/HdWCryptoData>
 
-Version 0.5.0 adds interval-aware total datasets and strict research loading.
+Version 0.6.1 fixes mixed timestamp units when merging archive and REST candles.
+Version 0.6.0 adds the lightweight, in-memory `BinanceKlineClient`.
+Interval-aware total datasets and strict research loading are available since 0.5.0.
 The local Crypto Archive Manager and shared SQLite archive index remain available.
 See [the changelog](changelog.md) for release details. The Showcase App opens
 standalone HTML charts and logs chart paths and calculation errors to the terminal.
