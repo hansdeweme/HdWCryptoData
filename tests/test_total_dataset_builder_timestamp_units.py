@@ -69,3 +69,43 @@ def test_microsecond_precision_is_not_rounded_into_duplicates(tmp_path):
     assert count == 2
     assert raw.open_time.tolist() == [row[0] for row in rows]
     assert raw.close_time.tolist() == [row[6] for row in rows]
+
+
+def test_overlap_priority_is_independent_of_directory_enumeration(tmp_path, monkeypatch):
+    builder = TotalDatasetBuilder('BONK', {'full_spot': str(tmp_path/'spot')})
+    builder.current_dir = str(tmp_path)
+    monthly, daily = Path(builder.MONTHS), Path(builder.DAYS)
+    monthly.mkdir(parents=True)
+    daily.mkdir(parents=True)
+    for directory, name, values in [
+        (monthly, 'BONKUSDT-1h-2026-10.csv', [candle('2026-10-20T00:00Z', 'us', 2), candle('2026-10-21T00:00Z', 'us', 2)]),
+        (daily, 'BONKUSDT-1h-2026-10-20.csv', [candle('2026-10-20T00:00Z', 'ms', 2.2)]),
+        (daily, 'BONKUSDT-1h-2026-10-21.csv', [candle('2026-10-21T00:00Z', 'ms', 2.2)]),
+    ]:
+        pd.DataFrame(values, columns=DEFAULT_COLUMNS).to_csv(directory/name, index=False, header=False)
+    live = tmp_path/'zzz-live.csv'
+    pd.DataFrame([candle('2026-10-21T00:00Z', 'ms', 2.5)], columns=DEFAULT_COLUMNS).to_csv(live, index=False)
+    builder.current_data = str(live)
+    real_listdir = os.listdir
+    monkeypatch.setattr(os, 'listdir', lambda path: sorted(real_listdir(path), reverse=True))
+    path, count = builder.merge_data()
+    assert count == 2
+    assert pd.read_csv(path).close.tolist() == [2.2, 2.5]
+    assert len(builder.warnings) == 2
+    assert all('Conflicting OHLCV' in warning for warning in builder.warnings)
+
+
+def test_binance_conflict_diagnostics_preserve_legacy_malformed_selected_value(tmp_path):
+    builder = TotalDatasetBuilder('BONK', {'full_spot': str(tmp_path/'spot')})
+    builder.current_dir = str(tmp_path)
+    monthly = Path(builder.MONTHS)
+    monthly.mkdir(parents=True)
+    pd.DataFrame([candle('2026-10-20T00:00Z', 'us')], columns=DEFAULT_COLUMNS).to_csv(
+        monthly/'BONKUSDT-1h-2026-10.csv', index=False, header=False)
+    live = tmp_path/'live.csv'
+    pd.DataFrame([candle('2026-10-20T00:00Z', 'ms', 'bad')], columns=DEFAULT_COLUMNS).to_csv(live, index=False)
+    builder.current_data = str(live)
+    path, count = builder.merge_data()
+    assert count == 1
+    assert pd.read_csv(path).close.tolist() == ['bad']
+    assert len(builder.warnings) == 1

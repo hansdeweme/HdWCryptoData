@@ -13,6 +13,10 @@ class ArchiveLocations:
     index: Path
     quarantine: Path
 
+    @property
+    def provider(self):
+        return 'coinbase' if self.spot.parent.name.lower() == 'coinbase' else 'binance'
+
 def archive_locations(root) -> ArchiveLocations:
     from .archive_manager import resolve_archive_root, _safe_path
     spot = resolve_archive_root(root)

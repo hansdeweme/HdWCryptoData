@@ -20,6 +20,8 @@ from .symbols import (
     SYMBOL_PATTERN,
     normalize_market_symbol,
     normalize_symbol,
+    MarketIdentity,
+    resolve_market,
 )
 from .total_dataset_builder import (
     MakeTotalError,
@@ -27,11 +29,18 @@ from .total_dataset_builder import (
     TotalDatasetBuilder,
 )
 from .total_dataset_loader import TotalDatasetLoader
+from .coinbase_client import CoinbaseClient, CoinbaseError, CoinbaseResponseError
+from .coinbase_archive_provisioner import CoinbaseArchiveProvisioner, inspect_partition
 from .version import VERSION as __version__
 
 
 
 __all__ = [
+    "CoinbaseClient",
+    "CoinbaseError",
+    "CoinbaseResponseError",
+    "CoinbaseArchiveProvisioner",
+    "inspect_partition",
     "__version__",
     "BinanceRestClient",
     "BinanceKlineClient",
@@ -49,4 +58,6 @@ __all__ = [
     "SYMBOL_PATTERN",
     "normalize_market_symbol",
     "normalize_symbol",
+    "MarketIdentity",
+    "resolve_market",
 ]

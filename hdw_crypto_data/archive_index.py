@@ -218,12 +218,16 @@ class ArchiveIndex:
         def date(field):
             return datetime.fromisoformat(row[field]) if row[field] else None
         identity = json.loads(row["identity_json"])
-        return FileRecord(path, relative, row["symbol"], row["interval"], row["size_bytes"], date("modified_at"),
+        record = FileRecord(path, relative, row["symbol"], row["interval"], row["size_bytes"], date("modified_at"),
                           tuple(identity) if identity else None,
                           CoverageRange(date("advertised_start"), date("advertised_end")),
                           CoverageRange(date("observed_start"), date("observed_end")), row["row_count"],
                           row["validation_status"], tuple(ValidationIssue(*i) for i in json.loads(row["issues_json"])),
                           bool(row["recognized"]), row["market_type"])
+        if record.provider == 'coinbase':
+            from .archive_manager import _inspect
+            return _inspect(record, self.root, lambda: False)
+        return record
 
     def snapshot(self):
         with self.connection() as connection:
@@ -241,6 +245,9 @@ class ArchiveIndex:
             summaries = self._summaries(connection.execute(SUMMARY_SQL).fetchall())
             connection.execute("COMMIT")
         records = tuple(self._decode(row) for row in rows)
+        if self.root.parent.name.lower() == 'coinbase':
+            from .archive_manager import _inventory
+            return _inventory(self.root, records)
         groups = {}
         for record in records:
             groups.setdefault((record.symbol or "Unknown", record.interval or "Unknown"), []).append(record)
@@ -250,6 +257,9 @@ class ArchiveIndex:
         return Inventory(self.root, records, assets)
 
     def list_asset_summaries(self):
+        if self.root.parent.name.lower() == 'coinbase':
+            return tuple(IndexSummary(a.symbol, a.interval, a.file_count, a.size_bytes,
+                a.coverage.start, a.coverage.end, a.observed_rows, a.status) for a in self.load_inventory().assets)
         # Totals are derived from the sole file table; no redundant summary cache.
         with self.connection() as connection:
             rows = connection.execute(SUMMARY_SQL).fetchall()

@@ -44,6 +44,26 @@ def test_default_and_existing_settings_compatibility(tmp_path):
                                interval="1d").interval == "1d"
 
 
+def test_binance_research_default_stays_hourly_with_other_configured_frequency(tmp_path):
+    for frequency, close in [('1h', 2), ('15m', 3)]:
+        pd.DataFrame({'open_time': [1791504000000], 'close': [close]}).to_csv(
+            tmp_path / f'BONKUSDT-spot-{frequency}-total-start--end.csv', index=False)
+    loader = TotalDatasetLoader('BONK', {'data_frequency': '15m'}, current_dir=str(tmp_path))
+    assert loader.load_research_dataframe().close.tolist() == [2]
+    assert loader.load_research_dataframe(interval='15m').close.tolist() == [3]
+    assert '15m' in loader.find_total_dataset_file()
+
+
+def test_legacy_binance_loader_defers_research_interval_validation(tmp_path):
+    path = tmp_path / 'BONKUSDT-total.csv'
+    pd.DataFrame({'open_time': [1791504000000], 'close': [2]}).to_csv(path, index=False)
+    loader = TotalDatasetLoader('BONK', {'data_frequency': '5m'}, current_dir=str(tmp_path))
+    assert loader.data_frequency == '5m'
+    assert loader.load_research_dataframe().close.tolist() == [2]
+    with pytest.raises(ValueError, match='Unsupported interval'):
+        loader.load_research_dataframe(interval='5m')
+
+
 @pytest.mark.parametrize("interval", ["15m", "1h", "1d"])
 def test_strict_fallback_does_not_cross_intervals(tmp_path, interval):
     suffix = "" if interval == "1h" else f"-{interval}"

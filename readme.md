@@ -1,11 +1,12 @@
 # HdW Crypto Data
 
-Utilities for downloading Binance Vision candlestick data, merging it with recent Binance API candles, and loading cleaned crypto time-series datasets for analysis.
+Utilities for acquiring Binance and Coinbase Exchange candles, verifying local archives, building provider-aware total datasets, and loading crypto time series for research and analysis.
 
 The core package is intentionally kept lightweight. The Archive Manager is an optional package module; the showcase app and technical-analysis chart helpers live in `examples/`. Heavy dependencies are imported only when those tools are used.
 
 Repository: <https://github.com/hansdeweme/HdWCryptoData>
 
+Version 0.7.0 adds Coinbase acquisition, archives, totals and Showcase integration.
 Version 0.6.1 fixes mixed timestamp units when merging archive and REST candles.
 Version 0.6.0 adds the lightweight, in-memory `BinanceKlineClient`.
 Interval-aware total datasets and strict research loading are available since 0.5.0.
@@ -38,6 +39,71 @@ Public imports are available from the package root:
 from hdw_crypto_data import BinanceVisionDumper, TotalDatasetBuilder, TotalDatasetLoader
 ```
 
+## Coinbase Exchange (0.7.0)
+
+Use explicit product IDs such as `HNT-USD`; Coinbase archive/research workflows
+support `1h` and `15m`. The client pages in windows of at most 300 candles,
+paces requests and uses bounded transport/server/rate-limit retries.
+
+```python
+from hdw_crypto_data import CoinbaseClient, CoinbaseArchiveProvisioner
+from hdw_crypto_data import TotalDatasetBuilder, TotalDatasetLoader, resolve_market
+
+datastore = "./datastore"
+cutoff = "2026-10-02T00:00:00Z"
+identity = resolve_market("HNT-USD", provider="coinbase", interval="1h")
+with CoinbaseClient() as client:
+    candles = client.get_candles(identity.product, interval="1h",
+        start="2026-10-01T00:00:00Z", end=cutoff, as_of=cutoff)
+    archives = CoinbaseArchiveProvisioner(datastore, client=client)
+    partitions = archives.provision(identity.product, interval="1h",
+        start="2026-10-01T00:00:00Z", end=cutoff, as_of=cutoff)
+    result = TotalDatasetBuilder(identity.product, {"datastore_root": datastore},
+        provider="coinbase", interval="1h", as_of=cutoff,
+        recent_source=client, current_dir="./totals").build()
+
+loader = TotalDatasetLoader(identity.product, {}, provider="coinbase", interval="1h")
+frame = loader.load_research_dataframe(result.filepath)
+```
+
+Provisioning is a separate explicit operation. It stores completed UTC months
+and days under `<datastore>/coinbase/spot/{monthly,daily}/klines/<product>/<interval>/`,
+separate from Binance archives. Current UTC days are excluded. Repeating a
+request resumes unverified windows; `repair=True` explicitly refreshes selected
+partitions. Each CSV has a required `.csv.metadata.json` sidecar with coverage,
+provenance and SHA-256. Keep the sidecar when copying archives or total CSVs.
+`inspect_partition(path)` reports verification and coverage without creating an index.
+
+Coinbase total filenames begin with `coinbase__`. Construction verifies archives,
+merges a bounded recent handoff (at most 500 interval buckets from the latest
+archived observation to the cutoff), and rejects conflicting OHLCV overlaps.
+Provision newer archives first if that bound is exceeded. Loading preserves the
+12-column CSV contract, with unavailable auxiliary measurements left missing.
+Gaps are not filled or interpolated; candle cutoffs exclude unfinished candles.
+
+Coinbase may omit buckets without trades. Missing observations are not proof of
+no trading and may prevent research calculations requiring complete coverage.
+Explicit historical cutoffs select candle times; acquisition timestamps do not
+prove that those observations were available historically. API interval support
+differs by provider: Binance research supports `15m`, `1h`, `1d`, while the
+lightweight Binance client supports additional exchange intervals.
+
+The Showcase's **Coinbase crypto** source provides separate archive provisioning
+and total-dataset actions. Run `python -m examples.showcase_pyqt_app` after
+installing `examples/requirements.txt`. A bounded live integration check is
+`python -m hdw_crypto_data.coinbase_smoke --totals`; it uses disposable storage.
+
+Existing Binance public exports and defaults remain available. Binance
+`load_research_dataframe()` still defaults to `1h`, even when settings select a
+different frequency; pass `interval=` explicitly to override it. Coinbase's
+omitted research interval follows the loader's configured interval. Legacy
+Binance loader construction defers research-frequency validation. Binance
+overlaps now use deterministic recent > daily > monthly priority, retain the
+first source at that priority and report conflicting OHLCV as warnings.
+
+Downstream Weekly Pattern applications using these Coinbase APIs must require
+`hdw-crypto-data>=0.7.0`; the older `>=0.5.0` floor does not provide them.
+
 ## Strict Research Data (0.5.0)
 
 Use an explicit interval (`15m`, `1h` or `1d`) when building or locating total
@@ -59,7 +125,7 @@ frame = loader.load_research_dataframe(
 hourly = loader.load_research_dataframe(interval="1h", preferred_tz="UTC")
 ```
 
-The strict loader preserves internal gaps, duplicates, row order and malformed
+For Binance, the strict loader preserves internal gaps, duplicates, row order and malformed
 values; callers must validate observations before analyzing them. It parses
 second, millisecond and microsecond timestamps in their original units. Use
 `load_total_dataframe()` for the existing optional cleaning/visualization path.

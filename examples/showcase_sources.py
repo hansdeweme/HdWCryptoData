@@ -10,6 +10,35 @@ import pandas as pd
 
 SOURCE_PACKAGES = ('hdw_stock_data', 'hdw_crypto_data')
 
+
+def load_showcase_settings(script_path):
+    """Support both examples/ packaging and a standalone showcase directory.
+
+    Settings beside the entry point win. Relative datastore/icon paths retain
+    their existing project-root meaning in the examples layout.
+    """
+    directory = Path(script_path).resolve().parent
+    root = directory.parent if directory.name in ('examples', 'hdw_crypto_data') else directory
+    adjacent = directory/'settings.json'
+    packaged = root/'examples'/'settings.json'
+    path = adjacent if adjacent.is_file() else packaged
+    settings = {'spot': '.', 'full_spot': './spot',
+                'stock_icons': 'examples/stock_icons', 'crypto_icons': 'examples/crypto_icons',
+                'quote_currency': 'USDT', 'preferred_time_zone': 'Europe/Amsterdam'}
+    if path.is_file():
+        import json
+        payload = json.loads(path.read_text(encoding='utf-8-sig'))
+        if not isinstance(payload, dict):
+            raise ValueError(f'Showcase settings must be a JSON object: {path}')
+        settings.update(payload)
+    for key in ('spot', 'full_spot', 'stock_icons', 'crypto_icons', 'datastore_root', 'total_dir'):
+        if settings.get(key):
+            value = Path(settings[key]).expanduser()
+            settings[key] = str(value if value.is_absolute() else (root/value).resolve())
+    settings['_settings_path'] = str(path) if path.is_file() else None
+    return settings
+
+
 def source_availability():
     """Check discoverability without importing optional acquisition pipelines.
 
@@ -77,6 +106,16 @@ class CryptoRequest:
     timezone: str = 'UTC'
     download_archives: bool = True
     force_merge: bool = False
+    provider: str = 'binance'
+    operation: str = 'total'
+    days: int = 7
+    as_of: str | None = None
+
+
+@dataclass(frozen=True)
+class ArchiveProvisionOutcome:
+    observations: int
+    details: str
 
 class StockSourceAdapter:
     def __init__(self, loader=None):
@@ -95,6 +134,10 @@ class StockSourceAdapter:
 
 class CryptoSourceAdapter:
     def load(self, request: CryptoRequest) -> MarketDataset:
+        if request.provider == 'coinbase':
+            return self._coinbase(request)
+        if request.provider != 'binance':
+            raise ValueError('Unsupported crypto provider')
         # Optional dependency: importing the showcase does not import crypto code.
         from hdw_crypto_data.binance_vision_dumper import BinanceVisionDumper
         from hdw_crypto_data.total_dataset_builder import TotalDatasetBuilder
@@ -122,6 +165,43 @@ class CryptoSourceAdapter:
         return MarketDataset.from_dataframe(df, symbol=f'{symbol}{quote}',
                                             interval=request.interval, provider='Binance',
                                             warnings=getattr(result, 'warnings', ()))
+
+    def _coinbase(self, request):
+        from datetime import datetime, timezone
+        from hdw_crypto_data import CoinbaseArchiveProvisioner, TotalDatasetBuilder, TotalDatasetLoader
+        from hdw_crypto_data.coinbase_client import utc_time
+        settings = dict(request.settings)
+        settings['preferred_time_zone'] = request.timezone
+        as_of = utc_time(request.as_of or datetime.now(timezone.utc))
+        root = settings.get('datastore_root', settings.get('spot'))
+        if not root:
+            raise ValueError('Choose the datastore directory')
+        settings['datastore_root'] = str(Path(root).resolve())
+        settings['data_frequency'] = request.interval
+        if request.operation == 'provision':
+            if not isinstance(request.days, int) or not 1 <= request.days <= 730:
+                raise ValueError('Choose 1–730 days of history')
+            start = as_of.normalize()-pd.Timedelta(days=request.days)
+            if start.replace(day=1) < as_of.normalize().replace(day=1):
+                # Closed months must be verified as whole monthly partitions.
+                start = start.replace(day=1)
+            results = CoinbaseArchiveProvisioner(root).provision(request.symbol, interval=request.interval,
+                start=start, end=as_of.normalize(), as_of=as_of)
+            details = '; '.join(f"{r.get('partition_start', r.get('path'))}: {r['status']}, "
+                f"{r.get('missing_buckets', '?')} missing buckets" for r in results)
+            return ArchiveProvisionOutcome(sum(r.get('observations', 0) for r in results), details or 'No completed days requested')
+        if request.operation != 'total':
+            raise ValueError('Choose archive provisioning or total construction')
+        from hdw_crypto_data.coinbase_archive_provisioner import coinbase_spot_root
+        output_dir = settings.get('total_dir', str(coinbase_spot_root(root).parent/'totals'))
+        result = TotalDatasetBuilder(request.symbol, settings, provider='coinbase',
+            interval=request.interval, as_of=as_of, current_dir=output_dir).build()
+        df = TotalDatasetLoader(request.symbol, settings, provider='coinbase', interval=request.interval,
+            current_dir=output_dir).load_total_dataframe(result.filepath, preferred_tz=request.timezone)
+        source_states = ', '.join(sorted({r['status'] for r in result.diagnostics['historical_sources']}))
+        warnings = (*result.warnings, f'Archive coverage states: {source_states}; {result.filepath}')
+        return MarketDataset.from_dataframe(df, symbol=request.symbol, interval=request.interval,
+            provider='Coinbase', warnings=warnings)
 
 
 def load_csv(path, *, symbol, interval='1h', timezone='UTC'):

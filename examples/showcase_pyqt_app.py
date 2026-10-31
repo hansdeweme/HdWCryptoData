@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QListWidgetItem, QTableW
 # local imports
 from .showcase_ui import build_ui
 from .stylesheet import DARK_STYLE
-from .showcase_sources import (MarketDataset, StockRequest, CryptoRequest, AcquisitionController, load_csv, SOURCE_PACKAGES, source_availability)
+from .showcase_sources import (MarketDataset, StockRequest, CryptoRequest, ArchiveProvisionOutcome, AcquisitionController, load_csv, SOURCE_PACKAGES, source_availability, load_showcase_settings)
 
 class PipelineWorker(QThread):
     dataset_ready = pyqtSignal(object)
@@ -41,6 +41,10 @@ class PipelineWorker(QThread):
             self.asset_started.emit(index)
             try:
                 dataset = self.controller.load(request)
+                if isinstance(dataset, ArchiveProvisionOutcome):
+                    self.asset_finished.emit(index, True, dataset.observations, dataset.details)
+                    self.progress.emit(index + 1, len(self.requests))
+                    continue
                 self.dataset_ready.emit(dataset)
                 self.asset_finished.emit(index, True, len(dataset.dataframe),
                                          '; '.join(dataset.warnings) or 'Ready for charting')
@@ -59,34 +63,24 @@ class MiniDumperApp(QMainWindow):
         self.chart_info_cache = {}
         self._active_source = None
         self._asset_selections = {}
-        self._custom_assets = {0: set(), 1: set()}
+        self._days_by_source = {0: 730, 2: 7}
+        self._custom_assets = {0: set(), 1: set(), 2: set()}
         self._icon_maps = {}
         self._batch_active = False
         self.available_sources = source_availability()
-        self.setWindowTitle('Market Data Showcase — Yahoo / Binance / DataFrame')
+        self.setWindowTitle('Market Data Showcase — Yahoo / Binance / Coinbase / DataFrame')
         self.resize(1240, 820)
         self.setStyleSheet(DARK_STYLE)
         self.init_ui()
+        self.append_log('Settings: '+str(self.settings.get('_settings_path') or 'built-in defaults'))
+        self.append_log('Configured datastore: '+str(self.settings.get('datastore_root', self.settings['spot'])))
         self.configure_source_availability()
         self.source_changed()
         for dataset in datasets:
             self.add_dataset(dataset)
 
     def load_settings(self):
-        root = Path(__file__).resolve().parents[1]
-        settings = {'spot': '.', 'full_spot': './spot',
-                    'stock_icons': 'examples/stock_icons',
-                    'crypto_icons': 'examples/crypto_icons',
-                    'quote_currency': 'USDT',
-                    'preferred_time_zone': 'Europe/Amsterdam'}
-        path = root / 'examples' / 'settings.json'
-        if path.exists():
-            settings.update(json.loads(path.read_text(encoding='utf-8')))
-        for key in ('spot', 'full_spot', 'stock_icons', 'crypto_icons'):
-            if settings.get(key):
-                value = Path(settings[key]).expanduser()
-                settings[key] = str(value if value.is_absolute() else (root / value).resolve())
-        return settings
+        return load_showcase_settings(__file__)
 
     def init_ui(self):
         build_ui(self)
@@ -97,6 +91,8 @@ class MiniDumperApp(QMainWindow):
         for index, available in enumerate(self.available_sources):
             if not available:
                 self.source_combo.setItemText(index, self.source_combo.itemText(index) + ' (package missing)')
+        if not self.available_sources[1]:
+            self.source_combo.setItemText(2, 'Coinbase crypto (package missing)')
         self.dependency_notice.setVisible(bool(missing))
         if missing:
             mode = ('Only the installed source can acquire data.' if any(self.available_sources)
@@ -115,26 +111,38 @@ class MiniDumperApp(QMainWindow):
     def source_changed(self):
         if self._active_source is not None:
             self._asset_selections[self._active_source] = set(self.selected_symbols())
+            self._days_by_source[self._active_source] = self.days_spin.value()
         self._active_source = self.source_combo.currentIndex()
         stock = self._active_source == 0
-        self.days_spin.setEnabled(stock)
-        self.days_spin.setVisible(stock)
-        self.days_label.setVisible(stock)
+        coinbase = self._active_source == 2
+        self.days_spin.setEnabled(stock or coinbase)
+        self.days_spin.setVisible(stock or coinbase)
+        self.days_label.setVisible(stock or coinbase)
+        self.days_spin.setValue(self._days_by_source.get(self._active_source, 730))
+        self.interval_combo.setEnabled(coinbase)
+        if not coinbase:
+            self.interval_combo.setCurrentText('1h')
+        self.provision_button.setVisible(coinbase)
+        self.datastore_input.setVisible(coinbase)
+        self.datastore_browse.setVisible(coinbase)
+        self.datastore_label.setVisible(coinbase)
         self.archive_check.setEnabled(not stock)
         self.force_check.setEnabled(not stock)
-        self.archive_check.setVisible(not stock)
-        self.force_check.setVisible(not stock)
+        self.archive_check.setVisible(not stock and not coinbase)
+        self.force_check.setVisible(not stock and not coinbase)
         self.asset_group.setTitle('Select stock assets' if stock else 'Select crypto assets')
-        self.pipeline_group.setTitle('Yahoo stock pipeline' if stock else 'Binance crypto pipeline')
+        self.pipeline_group.setTitle('Yahoo stock pipeline' if stock else 'Coinbase crypto pipeline' if coinbase else 'Binance crypto pipeline')
         self.pipeline_description.setText(
+            'Provision archives separately; Build total uses verified local archives plus recent completed candles. '
+            'Lookback applies only to provisioning; closed months are acquired in full. Gaps remain unfilled.' if coinbase else
             'Fetch hourly observations from Yahoo, normalize OHLCV, and prepare charts.' if stock else
             f'2. Build and load the total dataset. Archive directory: {self.settings["spot"]}')
         self.symbol_input.clear()
-        self.symbol_input.setPlaceholderText('Add AAPL, BRK.B, ^GSPC...' if stock else 'Add BTC, ETH, SOL...')
+        self.symbol_input.setPlaceholderText('Add FARTCOIN-USD, HNT-USD...' if coinbase else 'Add AAPL, BRK.B, ^GSPC...' if stock else 'Add BTC, ETH, SOL...')
         self.search_bar.clear()
         icons = {}
         directory = self.settings.get('stock_icons' if stock else 'crypto_icons')
-        if directory and Path(directory).is_dir():
+        if directory and Path(directory).is_dir() and not coinbase:
             for path in sorted(Path(directory).iterdir()):
                 if path.is_file() and path.suffix.lower() == '.png':
                     try:
@@ -145,9 +153,9 @@ class MiniDumperApp(QMainWindow):
         self.icon_path_label.setText(f'{len(icons)} icons loaded' if icons else
                                      'No icons found. Add a symbol or choose a suggested asset.')
         self.icon_path_label.setToolTip(str(directory or 'No icon directory configured'))
-        fallback = ['AAPL', 'MSFT', 'NVDA', '^GSPC'] if stock else ['BTC', 'ETH', 'SOL', 'BONK']
+        fallback = ['FARTCOIN-USD', 'HNT-USD'] if coinbase else ['AAPL', 'MSFT', 'NVDA', '^GSPC'] if stock else ['BTC', 'ETH', 'SOL', 'BONK']
         symbols = sorted(set(icons or fallback) | self._custom_assets[self._active_source])
-        selected = self._asset_selections.get(self._active_source, {'AAPL' if stock else 'BTC'})
+        selected = self._asset_selections.get(self._active_source, {'FARTCOIN-USD' if coinbase else 'AAPL' if stock else 'BTC'})
         self.asset_list.blockSignals(True)
         self.asset_list.clear()
         for symbol in symbols:
@@ -157,6 +165,9 @@ class MiniDumperApp(QMainWindow):
 
     def normalize_asset(self, symbol):
         value = symbol.strip().upper()
+        if self.source_combo.currentIndex() == 2:
+            from hdw_crypto_data.coinbase_client import product_id
+            return product_id(value)
         if self.source_combo.currentIndex() == 1:
             quote = self.settings.get('quote_currency', 'USDT').upper()
             value = value.removesuffix(quote)
@@ -186,10 +197,14 @@ class MiniDumperApp(QMainWindow):
         count = len(self.selected_symbols())
         self.selection_label.setText(f'{count} asset(s) selected')
         self.load_button.setText(f'Start batch processing ({count})')
-        available = self.available_sources[self.source_combo.currentIndex()]
+        source_index = min(self.source_combo.currentIndex(), 1)
+        available = self.available_sources[source_index]
+        self.provision_button.setEnabled(count > 0 and available and not self._batch_active)
+        if self.source_combo.currentIndex() == 2:
+            self.load_button.setText(f'Build Coinbase total ({count})')
         self.load_button.setEnabled(count > 0 and available and not self._batch_active)
         self.load_button.setToolTip('' if available else
-                                   f'Install {SOURCE_PACKAGES[self.source_combo.currentIndex()]} and restart first.')
+                                   f'Install {SOURCE_PACKAGES[source_index]} and restart first.')
 
     def filter_assets(self, text):
         for i in range(self.asset_list.count()):
@@ -230,8 +245,16 @@ class MiniDumperApp(QMainWindow):
         self.log_console.append(f'<span style="color:{colors[level]}">'
                                 f'[{datetime.now():%H:%M:%S}] [{level}] {escape(message)}</span>')
 
-    def start_processing(self):
-        if not self.available_sources[self.source_combo.currentIndex()]:
+    def choose_datastore(self):
+        selected = QFileDialog.getExistingDirectory(self, 'Select datastore root', self.datastore_input.text())
+        if selected:
+            self.datastore_input.setText(selected)
+
+    def start_provisioning(self):
+        self.start_processing(operation='provision')
+
+    def start_processing(self, checked=False, *, operation='total'):
+        if not self.available_sources[min(self.source_combo.currentIndex(), 1)]:
             QMessageBox.warning(self, 'Source package missing', self.dependency_notice.text())
             return
         from zoneinfo import ZoneInfo
@@ -244,9 +267,18 @@ class MiniDumperApp(QMainWindow):
             if self.source_combo.currentIndex() == 0:
                 requests = [StockRequest(s, days=self.days_spin.value(), timezone=timezone) for s in symbols]
             else:
-                requests = [CryptoRequest(s, dict(self.settings), timezone=timezone,
+                coinbase = self.source_combo.currentIndex() == 2
+                settings = dict(self.settings)
+                if coinbase:
+                    if not self.datastore_input.text().strip():
+                        raise ValueError('Choose the datastore directory')
+                    settings['datastore_root'] = self.datastore_input.text().strip()
+                requests = [CryptoRequest(s, settings, timezone=timezone,
                                           download_archives=self.archive_check.isChecked(),
-                                          force_merge=self.force_check.isChecked()) for s in symbols]
+                                          force_merge=self.force_check.isChecked(),
+                                          provider='coinbase' if coinbase else 'binance',
+                                          interval=self.interval_combo.currentText(), operation=operation,
+                                          days=self.days_spin.value()) for s in symbols]
         except Exception as exc:
             QMessageBox.warning(self, 'Invalid request', str(exc))
             return
@@ -257,7 +289,7 @@ class MiniDumperApp(QMainWindow):
         self.stop_button.setEnabled(True)
         self.table.setRowCount(len(requests))
         for row, request in enumerate(requests):
-            for column, text in enumerate((request.symbol, 'Yahoo' if isinstance(request, StockRequest) else 'Binance',
+            for column, text in enumerate((request.symbol, 'Yahoo' if isinstance(request, StockRequest) else request.provider.title(),
                                            'Pending', '-', 'Waiting')):
                 self.table.setItem(row, column, QTableWidgetItem(text))
         self.progress_bar.setRange(0, len(requests))

@@ -1,3 +1,37 @@
+## 0.7.0
+
+### Added
+
+- Coinbase Exchange historical candles at 1h and 15m, bounded pagination,
+  request pacing, retries and completed-candle cutoffs.
+- Incremental monthly/daily archive provisioning in separate Coinbase roots,
+  explicit repair, coverage diagnostics and checksum/provenance sidecars.
+- Provider-aware total construction and loading, market identity exports,
+  and separate Coinbase archive/total actions in the PyQt Showcase.
+
+### Compatibility and release preparation
+
+- Preserve Binance exports, hourly research-loader default, deferred legacy
+  loader frequency validation, and integer microsecond timestamp normalization.
+- Make Binance recent > daily > monthly overlap selection deterministic and
+  expose conflicting OHLCV warnings; Coinbase conflicts reject publication.
+- Normalize equivalent Windows device paths and support Coinbase inventory
+  metadata through the existing archive index.
+- Include example requirements in the sdist and gate release publication on
+  tests, successful builds and distribution metadata validation.
+- Core dependencies and the Python >=3.11 declaration are unchanged. Local
+  release validation is limited to installed Python interpreters.
+
+### Limitations
+
+- Coinbase archive/research support is restricted to 1h and 15m. Missing candle
+  buckets remain missing; sparse histories may be unsuitable for some research.
+- Total construction requires verified archives and a recent handoff of at most
+  500 interval buckets. Provision older history separately; no automatic backfill.
+- CSV provenance sidecars are required. Candle cutoffs and later acquisition
+  timestamps do not establish historical information availability.
+- Coinbase-dependent consumers need hdw-crypto-data>=0.7.0.
+
 ## 0.6.1
 
 ### Fixed

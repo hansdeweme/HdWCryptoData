@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 import numpy as np
 import pandas as pd
-from .symbols import normalize_market_symbol
+from .symbols import MarketIdentity, normalize_market_symbol, resolve_market
 from .intervals import normalize_interval
 
 DEFAULT_COLUMNS = [
@@ -22,6 +22,7 @@ DEFAULT_COLUMNS = [
     'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
 ]
 TOTAL_DATASET_GLOB = "{market}-spot-{frequency}-total-*--*.csv"
+_DEFAULT_RESEARCH_INTERVAL = object()
 
 
 def load_settings(settings) -> dict:
@@ -46,32 +47,49 @@ def format_total_dataset_datetime(value) -> str:
     timestamp = pd.to_datetime(seconds, unit='s', utc=True)
     return timestamp.strftime("%Y-%m-%dT%H-%M-%SZ")
 
-def total_dataset_filename(market: str, frequency: str, start_time, end_time) -> str:
+def total_dataset_filename(market: str, frequency: str, start_time, end_time, *, provider='binance') -> str:
+    if provider not in ('binance', 'coinbase'):
+        raise ValueError(f'Unsupported provider {provider!r}')
     start_text = format_total_dataset_datetime(start_time)
     end_text = format_total_dataset_datetime(end_time)
-    return f"{market}-spot-{frequency}-total-{start_text}--{end_text}.csv"
+    prefix = 'coinbase__' if provider == 'coinbase' else ''
+    return f"{prefix}{market}-spot-{frequency}-total-{start_text}--{end_text}.csv"
 
 class TotalDatasetLoader:
     """Load and clean previously generated total dataset CSV files."""
 
-    def __init__(self, asset, settings, current_dir: str | None = None):
+    def __init__(self, asset, settings, current_dir: str | None = None, *, provider=None, interval=None):
         self.settings = load_settings(settings)
-        self.MARKET = normalize_market_symbol(
-            asset,
-            self.settings.get("quote_currency", "USDT"),
-        )
+        self.provider = provider if provider is not None else self.settings.get('provider', 'binance')
+        frequency = self.settings.get('data_frequency', '1h') if interval is None else normalize_interval(interval)
+        if self.provider == 'binance':
+            # Legacy loaders accept frequencies outside the research API's
+            # subset; validate only when a research interval is requested.
+            quote = self.settings.get('quote_currency', 'USDT')
+            product = normalize_market_symbol(asset, quote)
+            quote = str(quote).strip().upper()
+            self.identity = MarketIdentity('binance', product, product[:-len(quote)], quote, frequency)
+        else:
+            self.identity = resolve_market(asset, provider=self.provider,
+                quote_currency=self.settings.get('quote_currency', 'USDT'), interval=frequency)
+        self.MARKET = self.identity.product
         self.current_dir = current_dir or os.getcwd()
         self.COLUMNS = list(DEFAULT_COLUMNS)
-        self.data_frequency = self.settings.get("data_frequency", "1h")
+        self.data_frequency = self.identity.interval
 
     def find_total_dataset_file(self, *, interval: str | None = None) -> str:
         """Find the newest total CSV for this market and configured frequency."""
         current_path = Path(self.current_dir)
         frequency = self.data_frequency if interval is None else normalize_interval(interval)
         pattern = TOTAL_DATASET_GLOB.format(market=self.MARKET, frequency=frequency)
+        if self.provider == 'coinbase':
+            pattern = 'coinbase__'+pattern
         candidates = [path for path in current_path.glob(pattern) if path.is_file()]
         if candidates:
-            return str(max(candidates, key=lambda path: path.stat().st_mtime))
+            return str(max(candidates, key=lambda path: (path.stat().st_mtime_ns, path.name)))
+
+        if self.provider == 'coinbase':
+            raise FileNotFoundError(f'No Coinbase {self.MARKET} {frequency} total in {current_path}')
 
         # Zero-argument calls preserve the historical fallback behavior.
         suffix = f"-{frequency}" if interval is not None and frequency != "1h" else ""
@@ -81,7 +99,7 @@ class TotalDatasetLoader:
     def load_research_dataframe(
         self,
         file_path: str | None = None,
-        interval: str = "1h",
+        interval=_DEFAULT_RESEARCH_INTERVAL,
         preferred_tz: str = "UTC",
     ) -> pd.DataFrame:
         """Load exact observations, retaining order, duplicates, NaT and gaps.
@@ -89,10 +107,30 @@ class TotalDatasetLoader:
         No cleaning, filling, resampling, row deletion or side-file writes occur.
         Malformed numeric values become NaN for downstream validation.
         """
+        if interval is _DEFAULT_RESEARCH_INTERVAL:
+            interval = self.data_frequency if self.provider == 'coinbase' else '1h'
         interval = normalize_interval(interval)
         if file_path is None:
             file_path = self.find_total_dataset_file(interval=interval)
         df = pd.read_csv(file_path)
+        metadata = None
+        if self.provider == 'coinbase':
+            from .coinbase_totals import load_total_metadata
+            from .dataset_quality import validate_ohlcv
+            metadata = load_total_metadata(file_path, product=self.MARKET, interval=interval)
+            if list(df.columns) != self.COLUMNS:
+                raise ValueError('Coinbase total must preserve the 12-column CSV contract')
+            df = validate_ohlcv(df, interval=interval)
+            if df.open_time.duplicated().any() or not df.open_time.is_monotonic_increasing:
+                raise ValueError('Coinbase total must be chronologically ordered and unique')
+            from .coinbase_client import utc_time
+            from .coinbase_client import INTERVAL_SECONDS
+            if (df.open_time+INTERVAL_SECONDS[interval]*1_000_000 > utc_time(metadata['as_of']).value//1000).any():
+                raise ValueError('Coinbase total contains unfinished candles at its cutoff')
+            from .dataset_quality import coverage
+            quality = coverage(df, interval=interval, start=metadata['quality']['requested_start'], end=metadata['as_of'])
+            if quality != metadata['quality']:
+                raise ValueError('Coinbase total coverage metadata contradicts observations')
         if list(df.columns) != self.COLUMNS and len(df.columns) == len(self.COLUMNS):
             df.columns = self.COLUMNS
         raw_time = pd.to_numeric(df["open_time"], errors="coerce")
@@ -108,6 +146,8 @@ class TotalDatasetLoader:
         df.index.name = "dt"
         for column in df.columns:
             df[column] = pd.to_numeric(df[column], errors="coerce")
+        if metadata is not None:
+            df.attrs['dataset_metadata'] = metadata
         return df
 
     def convert_dataframe_timezone(self, df: pd.DataFrame, preferred_tz: str = None) -> pd.DataFrame:
@@ -148,6 +188,22 @@ class TotalDatasetLoader:
             raise FileNotFoundError(f"Total dataset file not found: {file_path}")
         if preferred_tz is None:
             preferred_tz = self.settings.get("preferred_time_zone", "UTC")
+
+        if self.provider == 'coinbase':
+            if fill_gaps or clean_and_fill is True:
+                raise ValueError('Coinbase observations cannot be automatically filled or interpolated')
+            df = self.load_research_dataframe(file_path, interval=self.data_frequency, preferred_tz=preferred_tz)
+            mode_lower = str(mode).strip().lower()
+            if mode_lower in ('strip', 'close'):
+                columns = ['close']
+            elif mode_lower in ('none', 'full', 'raw'):
+                columns = [c for c in self.COLUMNS if c != 'ignore']
+            else:
+                columns = ['open','high','low','close','volume','number_of_trades']
+            result = df[columns].copy()
+            if not set_datetime_index:
+                result = result.reset_index()
+            return result
 
         df = pd.read_csv(file_path)
         if list(df.columns) != self.COLUMNS and len(df.columns) == len(self.COLUMNS):

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "hdw-crypto-data"
 dynamic = ["version"]
-description = "Download, verify, merge and normalize cryptocurrency data from Binance Vision and the Binance REST API. Manage locally archived data."
+description = "Acquire, verify, archive and load Binance and Coinbase cryptocurrency candles and provider-aware research datasets."
 readme = "readme.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -40,6 +40,7 @@ classifiers = [
 keywords = [
     "binance",
     "binance-vision",
+    "coinbase",
     "cryptocurrency",
     "market-data",
     "time-series",

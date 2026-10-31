@@ -1,4 +1,4 @@
-"""Build total dataset CSVs from historical Binance Vision data and live candles."""
+"""Build spot totals from Binance archives or verified Coinbase partitions."""
 # Copyright (c) 2024 Hans De Weme
 # Licensed under the MIT License (https://opensource.org/licenses/MIT).
 # part of the HdW_crypto_data Project
@@ -9,13 +9,14 @@ import os
 import re
 import shutil
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 import pandas as pd
 from dateutil.relativedelta import relativedelta
 # local imports
 from .binance_rest_client import BinanceRestClient
+from .coinbase_client import CoinbaseClient
 from .intervals import normalize_interval
 from .total_dataset_loader import TotalDatasetLoader, total_dataset_filename
 
@@ -26,6 +27,9 @@ class MakeTotalResult:
     rows: int
     dataframe_message: str
     interval: str = "1h"
+    provider: str = 'binance'
+    warnings: tuple[str, ...] = ()
+    diagnostics: dict = field(default_factory=dict)
 
 class MakeTotalError(RuntimeError):
     """Raised when total dataset creation cannot complete."""
@@ -35,7 +39,7 @@ class MakeTotalError(RuntimeError):
         super().__init__(message)
 
 class TotalDatasetBuilder(TotalDatasetLoader):
-    """Fetch live candles and merge them with historical Binance Vision CSVs."""
+    """Merge local archives and recent candles, preserving provider identity."""
 
     def __init__(
         self,
@@ -43,21 +47,31 @@ class TotalDatasetBuilder(TotalDatasetLoader):
         settings,
         force_merge=False,
         historical_source=None,
-        recent_source: BinanceRestClient | None = None,
+        recent_source: BinanceRestClient | CoinbaseClient | None = None,
         *,
         interval: str | None = None,
+        provider: str | None = None,
+        as_of=None,
+        current_dir: str | None = None,
     ):
-        super().__init__(asset, settings)
+        super().__init__(asset, settings, current_dir=current_dir, provider=provider, interval=interval)
         self.interval = normalize_interval(self.data_frequency if interval is None else interval)
         self.data_frequency = self.interval
         self.force_merge = force_merge
         self.historical_source = historical_source
-        self.recent_source = recent_source or BinanceRestClient()
+        self.recent_source = recent_source if self.provider == 'coinbase' else (recent_source or BinanceRestClient())
+        self.as_of = as_of
+        if self.provider == 'binance' and as_of is not None:
+            raise ValueError('Explicit as_of is supported by Coinbase totals; Binance recent acquisition uses its existing clock')
+        self.warnings = []
 
         spot_path = Path(self.settings.get("full_spot", "..\\spot"))
+        if self.provider == 'coinbase':
+            from .coinbase_archive_provisioner import coinbase_spot_root
+            spot_path = coinbase_spot_root(self.settings.get('coinbase_root', self.settings.get('datastore_root', spot_path.parent if spot_path.name.lower()=='spot' else spot_path)))
         dir_path = str(spot_path.resolve())
 
-        print("[Info] ----> Start with market-chosen: " + self.MARKET)
+        print("[Info] ---> Start with market-chosen: " + self.MARKET)
         self.WORK = dir_path
         self.MONTHS = self._resolve_kline_dir(dir_path, "monthly")
         self.DAYS = self._resolve_kline_dir(dir_path, "daily")
@@ -66,8 +80,18 @@ class TotalDatasetBuilder(TotalDatasetLoader):
         print(f"[Info] ---> Months Directory: {self.MONTHS}")
         print(f"[Info] ---> Days Directory: {self.DAYS}")
 
-    def build(self, open_candle: str | None = None) -> MakeTotalResult:
+    def build(self, open_candle: str | None = None, *, as_of=None) -> MakeTotalResult:
         """Build and return an explicit result for the newly generated total dataset."""
+        if self.provider == 'coinbase':
+            if open_candle not in (None, 'exclude'):
+                raise MakeTotalError(self.MARKET, 'Coinbase totals contain completed candles only')
+            from .coinbase_totals import build_coinbase_total
+            try:
+                return build_coinbase_total(self, self.as_of if as_of is None else as_of)
+            except (ValueError, OSError, ConnectionError) as error:
+                raise MakeTotalError(self.MARKET, str(error)) from error
+        if as_of is not None:
+            raise MakeTotalError(self.MARKET, 'Explicit as_of is supported by Coinbase totals only')
         is_recent, most_recent_date = self.check_recent_spotmarket_files(self.MONTHS, self.DAYS, self.MARKET)
 
         if not is_recent and not self.force_merge:
@@ -86,6 +110,7 @@ class TotalDatasetBuilder(TotalDatasetLoader):
             rows=rows,
             dataframe_message=f"Total dataset created ({rows:,} {self.interval} rows)",
             interval=self.interval,
+            warnings=tuple(self.warnings),
         )
 
     def _resolve_kline_dir(self, base_dir: str, timeperiod: str) -> str:
@@ -213,7 +238,7 @@ class TotalDatasetBuilder(TotalDatasetLoader):
 
             monthly_count = 0
             if os.path.exists(self.MONTHS):
-                for file_name in os.listdir(self.MONTHS):
+                for file_name in sorted(os.listdir(self.MONTHS)):
                     if file_name.startswith(self.MARKET) and file_name.endswith('.csv'):
                         monthly_count += 1
                         shutil.copy(os.path.join(self.MONTHS, file_name), os.path.join(work_dir, file_name))
@@ -221,13 +246,16 @@ class TotalDatasetBuilder(TotalDatasetLoader):
 
             daily_count = 0
             if os.path.exists(self.DAYS):
-                for file_name in os.listdir(self.DAYS):
+                for file_name in sorted(os.listdir(self.DAYS)):
                     if file_name.startswith(self.MARKET) and file_name.endswith('.csv'):
                         daily_count += 1
                         shutil.copy(os.path.join(self.DAYS, file_name), os.path.join(work_dir, file_name))
             print(f"[Info] Copied {daily_count} daily files")
 
-            file_list = [os.path.join(work_dir, f) for f in os.listdir(work_dir) if f.endswith('.csv')]
+            live_name = os.path.basename(getattr(self, 'current_data', ''))
+            daily_names = set(os.listdir(self.DAYS)) if os.path.isdir(self.DAYS) else set()
+            file_list = [os.path.join(work_dir, f) for f in sorted(os.listdir(work_dir),
+                key=lambda name: (0 if name == live_name else 1 if name in daily_names else 2, name)) if f.endswith('.csv')]
             print(f"[Info] Total files to merge: {len(file_list)}")
 
             if not file_list:
@@ -247,9 +275,11 @@ class TotalDatasetBuilder(TotalDatasetLoader):
                     if len(df_temp.columns) >= len(self.COLUMNS):
                         df_temp = df_temp.iloc[:, :len(self.COLUMNS)]
                         df_temp.columns = self.COLUMNS
+                        df_temp['__source'] = os.path.basename(file)
                         df_list.append(df_temp)
                     else:
                         df_temp.columns = self.COLUMNS[:len(df_temp.columns)]
+                        df_temp['__source'] = os.path.basename(file)
                         df_list.append(df_temp)
                 except Exception as ex:
                     print(f"[Warning] Failed reading {file}: {ex}")
@@ -275,9 +305,15 @@ class TotalDatasetBuilder(TotalDatasetLoader):
                 normalized.loc[seconds] = raw.loc[seconds] * 1_000_000
                 df_total[column] = normalized
             df_total = df_total.dropna(subset=['open_time'])
-            # Retain the existing first-source-wins overlap policy.
-            df_total = df_total.drop_duplicates(subset=['open_time'])
-            df_total = df_total.sort_values('open_time', kind='stable').reset_index(drop=True)
+            # Preserve Binance's recent-wins compatibility, but make the source
+            # order deterministic and report materially different OHLCV.
+            from .dataset_quality import merge_observations
+            ordered_sources = [(name, df_total.loc[df_total['__source']==name].drop(columns='__source'))
+                               for name in dict.fromkeys(df_total['__source'])]
+            df_total, conflicts = merge_observations(ordered_sources, strict=False)
+            self.warnings.extend(conflicts)
+            for conflict in conflicts:
+                print('[Warning] '+conflict)
             if df_total.empty:
                 msg = "No rows with valid candle timestamps available to merge"
                 print(f"[Warning] {msg}")

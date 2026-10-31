@@ -66,6 +66,19 @@ class FileRecord:
     recognized: bool = False
     market: str = "spot"
 
+    @property
+    def provider(self):
+        from .archive_paths import spot_root_for_file
+        root = spot_root_for_file(self.path)
+        return 'coinbase' if root is not None and root.parent.name.lower() == 'coinbase' else 'binance'
+
+    @property
+    def coverage_metadata(self):
+        if self.provider == 'coinbase':
+            from .coinbase_archive_provisioner import inspect_partition
+            return inspect_partition(self.path)
+        return {}
+
 
 @dataclass(frozen=True)
 class AssetInventory:
@@ -94,9 +107,24 @@ def _identity(path: Path) -> tuple[int, int, int, int]:
     return s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns
 
 
+def _canonical_windows_path(path):
+    """Windows resolve can retain a device prefix if a SQLite sidecar vanishes.
+
+    Normalize equivalent spellings, without changing traversal/link checks.
+    """
+    text = str(path)
+    if os.name == 'nt':
+        if text.startswith('\\\\?\\UNC\\'):
+            text = '\\\\'+text[8:]
+        elif text.startswith('\\\\?\\'):
+            text = text[4:]
+    return Path(text)
+
+
 def _safe_path(root: Path, path: Path, *, must_exist: bool = True) -> Path:
     """Reject traversal and all symlinks/junctions, including internal links."""
-    path = Path(path)
+    root = _canonical_windows_path(root)
+    path = _canonical_windows_path(path)
     if ".." in path.parts:
         raise ValueError(f"Path traversal rejected: {path}")
     path = path if path.is_absolute() else root / path
@@ -111,7 +139,7 @@ def _safe_path(root: Path, path: Path, *, must_exist: bool = True) -> Path:
         current = current / part
         if _is_link(current):
             raise ValueError(f"Linked path rejected: {current}")
-    resolved = path.resolve(strict=must_exist)
+    resolved = _canonical_windows_path(path.resolve(strict=must_exist))
     if not resolved.is_relative_to(root):
         raise ValueError(f"Path escapes root: {path}")
     return resolved
@@ -123,7 +151,7 @@ def resolve_archive_root(root: str | Path) -> Path:
     for part in (candidate, *candidate.parents):
         if _is_link(part):
             raise ValueError(f"Linked archive root rejected: {part}")
-    candidate = candidate.resolve(strict=True)
+    candidate = _canonical_windows_path(candidate.resolve(strict=True))
     if candidate.name.lower() != "spot":
         candidate = _safe_path(candidate, candidate / "spot")
     if not candidate.is_dir():
@@ -154,14 +182,23 @@ def _record(root: Path, path: Path) -> FileRecord:
     if len(parts) == 5 and parts[0] in ("daily", "monthly") and parts[1] == "klines":
         period, _, symbol, interval, filename = parts
         try:
-            if normalize_symbol(symbol) != symbol:
+            coinbase = root.parent.name.lower() == 'coinbase'
+            if coinbase:
+                from .coinbase_client import product_id, INTERVAL_SECONDS
+                product_id(symbol)
+                if interval not in INTERVAL_SECONDS:
+                    raise ValueError('Unsupported Coinbase interval')
+            elif normalize_symbol(symbol) != symbol:
                 raise ValueError("Noncanonical symbol")
             match = re.fullmatch(r".+-(\d{4}-\d{2}(?:-\d{2})?)\.csv", filename)
             if not match:
                 raise ValueError("Malformed or unsupported filename")
             date = datetime.strptime(match[1], "%Y-%m-%d" if period == "daily" else "%Y-%m").replace(tzinfo=UTC)
-            dumper = BinanceVisionDumper(str(root), data_frequency=interval)
-            expected = Path(dumper.get_local_dir_to_data(symbol, period)) / dumper.create_filename(symbol, date.date(), period)
+            if coinbase:
+                expected = root/period/'klines'/symbol/interval/f'{symbol}-{interval}-{match[1]}.csv'
+            else:
+                dumper = BinanceVisionDumper(str(root), data_frequency=interval)
+                expected = Path(dumper.get_local_dir_to_data(symbol, period)) / dumper.create_filename(symbol, date.date(), period)
             if expected != path:
                 raise ValueError("Filename does not match archive hierarchy")
             days = 1 if period == "daily" else calendar.monthrange(date.year, date.month)[1]
@@ -182,6 +219,20 @@ def _inspect(record: FileRecord, root: Path, cancelled: Callable[[], bool]) -> F
     if not record.recognized or record.identity is None:
         return record
     issues = list(record.issues)
+    if record.provider == 'coinbase':
+        from .coinbase_totals import read_partition
+        from .coinbase_archive_provisioner import inspect_partition
+        metadata = inspect_partition(record.path)
+        try:
+            frame, metadata = read_partition(record.path, product=record.symbol, interval=record.interval)
+            if metadata['status'] != 'COMPLETE':
+                issues.append(ValidationIssue('coverage', f"Coinbase {metadata['status']}: {metadata['missing_buckets']} missing buckets"))
+        except (ValueError, OSError, KeyError, TypeError) as error:
+            issues.append(ValidationIssue('coinbase_metadata', str(error)))
+        observed = CoverageRange(datetime.fromisoformat(metadata['first_observed']) if metadata.get('first_observed') else None,
+                                 datetime.fromisoformat(metadata['last_observed']) if metadata.get('last_observed') else None)
+        return replace(record, observed=observed, row_count=metadata.get('observations'),
+                       status='Warning' if issues else 'OK', issues=tuple(issues))
     count = 0
     first = last = previous = None
     invalid = unordered = 0
@@ -263,13 +314,16 @@ def scan_archive(root: str | Path, mode: str = "fast", *, progress=None, cancell
         for name in sorted(files):
             if name.endswith((".part", ".tmp", ".zip", ".CHECKSUM")):
                 continue
+            if root.parent.name.lower() == 'coinbase' and name.endswith(('.metadata.json', '.attempt.json', '.lock')):
+                continue
             if cancelled():
                 raise InterruptedError("Scan cancelled")
             record = _record(root, Path(directory) / name)
             previous = cached.get(record.path)
             if (mode == "deep" and previous is not None and record.recognized
                     and record.identity is not None and record.identity == previous.identity
-                    and record.advertised == previous.advertised and previous.row_count is not None):
+                    and record.advertised == previous.advertised and previous.row_count is not None
+                    and record.provider != 'coinbase'):
                 record = previous
             elif mode == "deep":
                 record = _inspect(record, root, cancelled)
